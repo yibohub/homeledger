@@ -57,7 +57,7 @@
       <a class="tiny" href="/transactions">全部 →</a>
     </div>
     <% if (!recent || !recent.length) { %>
-    <div class="m-empty">还没有记录，说一句「午饭 35 元」试试</div>
+    <div class="m-empty"><%= canWrite(ledger.role) ? '还没有记录，说一句「午饭 35 元」试试' : '还没有记录' %></div>
     <% } else { %>
     <div class="m-recent">
       <% recent.slice(0, 5).forEach(function(t){ %>

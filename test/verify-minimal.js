@@ -156,35 +156,50 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   check('极简首页「最近 5 笔」出现该记录（非空态占位文案）', r.status === 200 && r.text.includes('m-txn') && /m-txn[\s\S]{0,400}午饭/.test(r.text), '');
 
   /* --- 问账嵌入 Tab1（阶段 2）：同一输入框，问句走查账、记账句照旧出草稿 --- */
-  const countTxn = (html) => (html.match(/class="m-txn"/g) || []).length;
-  const before = countTxn(r.text);
+  // 首页 m-txn 最多渲染 5 条，≥5 笔时页面计数不变、断言恒真——只读不变式按库内计数（评审建议）；
+  // 库不可达（非 data-verify* 测试目录）时退回页面计数粗验
+  const dbFile = path.join(SERVER_DATA_DIR, 'homeledger.db');
+  const dbReachable = /^data-verify/.test(path.basename(SERVER_DATA_DIR)) && fs.existsSync(dbFile);
+  const txnCountInDb = () => {
+    const c = new DatabaseSync(dbFile);
+    c.exec('PRAGMA busy_timeout = 5000;');
+    const n = c.prepare('SELECT COUNT(*) AS c FROM transactions WHERE deleted_at IS NULL').get().c;
+    c.close();
+    return n;
+  };
+  const countInHtml = (html) => (html.match(/class="m-txn"/g) || []).length;
+  const before = dbReachable ? txnCountInDb() : countInHtml(r.text);
   r = await req('POST', '/api/ai/text', { json: { text: '这个月餐饮花了多少' }, ua: PHONE_UA });
   check('问句返回查账回答而非草稿', r.status === 200 && r.json.ok === true
     && (r.json.mode === 'answer' || r.json.mode === 'clarify') && (r.json.text || '').length > 0 && r.json.items === undefined,
     `HTTP ${r.status} mode=${r.json && r.json.mode} text=${r.json ? String(r.json.text).slice(0, 30) : ''}`);
   check('无 Key 时查账走规则引擎（零依赖降级）', r.json.engine === 'rule', `engine=${r.json && r.json.engine}`);
-  r = await req('GET', '/', { ua: PHONE_UA });
-  check('问句不产生任何新记录（查账只读）', countTxn(r.text) === before, `${before} → ${countTxn(r.text)}`);
+  const afterHome = await req('GET', '/', { ua: PHONE_UA });
+  const after = dbReachable ? txnCountInDb() : countInHtml(afterHome.text);
+  check('问句不产生任何新记录（查账只读）', after === before, `${before} → ${after}`);
 
   /* --- 只读成员：可见捕获区可问账，拍单隐藏、不可记（直连 8099 实例的库改角色）--- */
-  const dbFile = path.join(SERVER_DATA_DIR, 'homeledger.db');
-  if (/^data-verify/.test(path.basename(SERVER_DATA_DIR)) && fs.existsSync(dbFile)) {
+  if (dbReachable) {
     const raw = new DatabaseSync(dbFile);
     raw.exec('PRAGMA busy_timeout = 5000;');
-    const adminId = raw.prepare('SELECT u.id AS id, lm.role FROM ledger_members lm JOIN users u ON u.id = lm.user_id WHERE u.username = ?').get('admin');
-    raw.prepare("UPDATE ledger_members SET role = 'viewer' WHERE user_id = ?").run(adminId.id);
-    r = await req('GET', '/', { ua: PHONE_UA });
-    check('只读成员也见捕获区（可问账），拍单隐藏、主按钮变「提问」', r.status === 200
-      && r.text.includes('id="mCapture"') && r.text.includes('id="mText"') && r.text.includes('id="mGo"')
-      && !r.text.includes('id="mCam"') && r.text.includes('>提问</span>'), `HTTP ${r.status}`);
-    r = await req('POST', '/api/ai/text', { json: { text: '这个月餐饮花了多少' }, ua: PHONE_UA });
-    check('只读成员问句可查账', r.status === 200 && (r.json.mode === 'answer' || r.json.mode === 'clarify'), `HTTP ${r.status} mode=${r.json && r.json.mode}`);
-    r = await req('POST', '/api/ai/text', { json: { text: '可乐 6 元' }, ua: PHONE_UA });
-    check('只读成员记账句被 403 拒绝（JSON 提示可问账）', r.status === 403 && /只读/.test(r.json.error || '') && (r.json.error || '').includes('提问'), `HTTP ${r.status} ${r.json && r.json.error}`);
-    raw.prepare('UPDATE ledger_members SET role = ? WHERE user_id = ?').run(adminId.role, adminId.id);
-    raw.close();
+    // 按 ledger_id 圈定（多账本不误伤其他账本角色）；恢复用捕获的原角色，try/finally 保证中途异常也复位（评审建议）
+    const adminRow = raw.prepare('SELECT u.id AS id, lm.role AS role, lm.ledger_id AS ledger_id FROM ledger_members lm JOIN users u ON u.id = lm.user_id WHERE u.username = ?').get('admin');
+    try {
+      raw.prepare("UPDATE ledger_members SET role = 'viewer' WHERE user_id = ? AND ledger_id = ?").run(adminRow.id, adminRow.ledger_id);
+      r = await req('GET', '/', { ua: PHONE_UA });
+      check('只读成员也见捕获区（可问账），拍单隐藏、主按钮变「提问」', r.status === 200
+        && r.text.includes('id="mCapture"') && r.text.includes('id="mText"') && r.text.includes('id="mGo"')
+        && !r.text.includes('id="mCam"') && r.text.includes('>提问</span>'), `HTTP ${r.status}`);
+      r = await req('POST', '/api/ai/text', { json: { text: '这个月餐饮花了多少' }, ua: PHONE_UA });
+      check('只读成员问句可查账', r.status === 200 && r.json && (r.json.mode === 'answer' || r.json.mode === 'clarify'), `HTTP ${r.status} mode=${r.json && r.json.mode}`);
+      r = await req('POST', '/api/ai/text', { json: { text: '可乐 6 元' }, ua: PHONE_UA });
+      check('只读成员记账句被 403 拒绝（JSON 提示可问账）', r.status === 403 && /只读/.test((r.json || {}).error || '') && ((r.json || {}).error || '').includes('提问'), `HTTP ${r.status} ${r.json && r.json.error}`);
+    } finally {
+      raw.prepare('UPDATE ledger_members SET role = ? WHERE user_id = ? AND ledger_id = ?').run(adminRow.role, adminRow.id, adminRow.ledger_id);
+      raw.close();
+    }
     r = await req('POST', '/api/ai/text', { json: { text: '晚饭 42 元' }, ua: PHONE_UA });
-    check('恢复角色后记账句照旧出草稿', r.status === 200 && r.json.ok === true && r.json.items.length === 1 && r.json.mode === undefined, `HTTP ${r.status}`);
+    check('恢复角色后记账句照旧出草稿', r.status === 200 && r.json && r.json.ok === true && r.json.items.length === 1 && r.json.mode === undefined, `HTTP ${r.status}`);
   } else {
     check('（跳过只读矩阵：8099 实例库不可达或非测试目录）', true);
   }

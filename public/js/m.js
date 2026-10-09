@@ -158,7 +158,8 @@
   }
 
   /* --------------------------- 问账回答卡（P10 阶段 2） --------------------------- */
-  // mode=answer 直出统计结论，mode=clarify 反问引导；插到草稿流顶部，内容全走 textContent
+  // mode=answer 直出统计结论，mode=clarify 反问引导；插到草稿流顶部，内容全走 textContent；
+  // 带 ✕ 可关（多次提问会堆积，与草稿卡的「放弃」对齐）
   function renderAnswer(data) {
     const card = document.createElement('div');
     card.className = 'm-answer';
@@ -183,6 +184,13 @@
     rpt.textContent = '看报表 →';
     meta.appendChild(rpt);
     card.appendChild(meta);
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'm-answer-x';
+    close.setAttribute('aria-label', '关闭');
+    close.textContent = '✕';
+    close.addEventListener('click', () => card.remove());
+    card.appendChild(close);
     draftsEl.insertBefore(card, draftsEl.firstChild);
   }
 

@@ -553,15 +553,16 @@
         quickBtn.disabled = false;
         if (!res.ok) return toast('识别失败：' + res.error, 'error');
         resultBox.innerHTML = '';
-        (res.warnings || []).forEach((w) => toast(w, 'warn'));
         if (res.mode === 'answer' || res.mode === 'clarify') {
-          // 问句走查账（P10 阶段 2 后 /api/ai/text 与悬浮球同分流）：直出回答，不建草稿
+          // 问句走查账（P10 阶段 2 后 /api/ai/text 与悬浮球同分流）：直出回答不建草稿；
+          // 警示直接进卡片展示不再 toast，clarify 标注与 m.js 一致
           let h = '<div class="ai-answer">' + esc(res.text || '').replace(/\n/g, '<br>') + '</div>';
-          h += `<div class="ai-meta"><span>${esc(res.engine === 'llm' ? 'AI 统计' : '规则统计')}</span><span>·</span><a href="/reports">看报表 →</a></div>`;
+          h += `<div class="ai-meta"><span>${esc((res.engine === 'llm' ? 'AI 统计' : '规则统计') + (res.mode === 'clarify' ? '（请补充）' : ''))}</span><span>·</span><a href="/reports">看报表 →</a></div>`;
           if (res.warnings && res.warnings.length) h += `<div class="ai-warn">⚠ ${esc(res.warnings.join('；'))}</div>`;
           resultBox.innerHTML = h;
           return;
         }
+        (res.warnings || []).forEach((w) => toast(w, 'warn'));
         if (!res.items.length) return toast('没能识别出金额，请换个说法，例如「午饭 35 元 支付宝」', 'warn');
         const single = res.items[0];
         const url = '/transactions/new?type=' + encodeURIComponent(single.type) +
