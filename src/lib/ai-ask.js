@@ -542,27 +542,31 @@ function keyAmountsOf(data) {
   return out.filter((c) => Number.isFinite(c) && c !== 0);
 }
 
-/** 归一化后比对：模型可能写 ¥3,460.50 / ¥3460.50 / 3460.50 元，逗号、符号、空格不作数 */
+/** 归一化后提取数字：模型可能写 ¥3,460.50 / ¥3460.5 / 454元 / 约¥3461，逗号、货币符不作数 */
 const normNum = (s) => String(s).replace(/[,\s¥￥元]/g, '');
 
-/** 数字子串带边界匹配：「35.00」不能被「¥135.00」糊弄（前一位是数字即不算命中） */
-function coversNum(t, k) {
-  let i = t.indexOf(k);
-  while (i !== -1) {
-    const before = i > 0 ? t[i - 1] : '';
-    const after = i + k.length < t.length ? t[i + k.length] : '';
-    if (!/\d/.test(before) && !/\d/.test(after)) return true;
-    i = t.indexOf(k, i + 1);
+/** 从叙述里提取全部数字（转为分）。按数值比对而非字符串匹配：
+ *  「¥454」= 454.00、「454.0」= 454.00——字符串匹配会把整元/少位小数的合格回答误杀
+ *  （真实 Key 下频繁误触发回退的根因）；解析天然带边界，「1454」不会糊弄 454。
+ *  带「万」后缀按倍乘解析（「1.5万」= 1500 元） */
+function numbersIn(text) {
+  const out = new Set();
+  for (const m of normNum(text).matchAll(/(\d+(?:\.\d+)?)(万)?/g)) {
+    const cents = Math.round(parseFloat(m[1]) * (m[2] ? 10000 : 1) * 100);
+    if (Number.isFinite(cents)) out.add(cents);
   }
-  return false;
+  return out;
 }
 
-/** 模型叙述是否覆盖全部关键金额；不覆盖就退回模板（确定性优先，与防臆造账户同一模式） */
+/** 模型叙述是否覆盖全部关键金额；不覆盖就退回模板（确定性优先，与防臆造账户同一模式）。
+ *  允许 ±1 元的取整差（模型爱写「约 ¥3461」）：核验的职责是抓「漏说」，不是逼模型抄格式 */
+const ROUND_TOLERANCE_CENTS = 100;
+
 function narrationCovers(data, text) {
-  const keys = keyAmountsOf(data).map((c) => (c / 100).toFixed(2));
+  const keys = keyAmountsOf(data);
   if (!keys.length) return true;
-  const t = normNum(text);
-  if (!keys.every((k) => coversNum(t, k))) return false;
+  const nums = [...numbersIn(text)];
+  if (!keys.every((k) => nums.some((n) => Math.abs(n - k) <= ROUND_TOLERANCE_CENTS))) return false;
   // 对比类上期为 0：金额豁免可以，但基数必须口头交代（「上个月没有支出」/「上月 ¥0.00」），
   // 否则「多花了¥454」式的无参照回答会溜过（真实 Key 验证抓到的案例）。
   // 在原文上匹配并防数字内 0 误中（「454.00 元」的 0 不算交代了基数）；「无」必须带宾语，

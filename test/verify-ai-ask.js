@@ -198,6 +198,15 @@ check('budget 三项都要（预算/已用/剩余）',
 check('数字边界匹配：「35.00」不被「¥135.00」糊弄',
   aiAsk.narrationCovers({ type: 'category_summary', total: 3500 }, '花了 ¥135.00。') === false
   && aiAsk.narrationCovers({ type: 'category_summary', total: 3500 }, '花了 ¥35.00。') === true);
+check('数值语义匹配（格式无关）：整元/少位小数/千分位/约数/万元缩写都算覆盖',
+  aiAsk.narrationCovers({ type: 'category_summary', total: 45400 }, '这个月花了 ¥454。') === true
+  && aiAsk.narrationCovers({ type: 'category_summary', total: 45400 }, '这个月花了 454.0 元。') === true
+  && aiAsk.narrationCovers({ type: 'category_summary', total: 346050 }, '花了 ¥3,460.5。') === true
+  && aiAsk.narrationCovers({ type: 'category_summary', total: 346050 }, '大约花了 ¥3,461。') === true
+  && aiAsk.narrationCovers({ type: 'category_summary', total: 1500000 }, '花了 1.5万。') === true);
+check('数值语义匹配：漏说关键数字仍被拒（核验的本职）',
+  aiAsk.narrationCovers({ type: 'compare', cur_total: 45400, prev_total: 5000, delta: 40400 }, '这个月比上个月多花了不少。') === false
+  && aiAsk.narrationCovers({ type: 'compare', cur_total: 45400, prev_total: 5000, delta: 40400 }, '本月 ¥454，上月 ¥50。') === false);
 
 /* 不变式防线：模板自身必须天然通过核验——否则未来改 narrateTemplate/money 格式时，
    有 Key 用户会静默退化成永远退回模板（无 Key 测试环境不会红，只有这条断言能拦住） */
