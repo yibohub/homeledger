@@ -9,6 +9,7 @@
 | 层 | 入口 | 说明 |
 |----|------|------|
 | 规则层 | [`/AGENTS.md`](../AGENTS.md) | 每次会话自动加载：概述 / 常用命令 / 架构要点 / 必须禁止短句 |
+| 执行视图 | [BOARD.md](BOARD.md) | **回答「下一步」先看这里**：进行中 / 待办 / 押后（必须带触发条件）/ 已完成 |
 | 导航层 | 本文件 | 按任务场景索引规则与展开文档 |
 | 文档层 | [solutions/](solutions/README.md) · [ai-roadmap.md](ai-roadmap.md) · [collaboration.md](collaboration.md) | 完整知识、踩坑根因与方案、路线图、协作规则 |
 
@@ -23,6 +24,7 @@
 
 ## 维护提示
 
+- **事项状态变化 → 更新 [BOARD.md](BOARD.md)**（规则见其「怎么维护」节：押后必须带触发条件；AI 项只放一行链接）
 - 新踩坑 → `docs/solutions/<主题>.md` + 更新 [solutions/README.md](solutions/README.md) 索引；规则层只加「别重犯」短句（AGENTS.md §必须禁止）
 - 新路线/计划 → `docs/` 日期前缀命名；现状与进度回填 `ai-roadmap.md`
 - 改 AGENTS.md 的短句前，先确认 `solutions/` 里的根因描述仍然成立（两层不能漂移）
