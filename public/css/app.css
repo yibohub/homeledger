@@ -1430,11 +1430,16 @@ html { scroll-behavior: smooth; }
 .m-budget .bar.warn .bar-fill { background: var(--warn); }
 .m-budget .bar.over .bar-fill { background: var(--expense); }
 
-.m-capture-input { display: flex; align-items: flex-end; gap: 6px; }
-.m-capture-input textarea { flex: 1; min-width: 0; resize: none; border: 1px solid var(--border); border-radius: 11px; padding: 9px 11px; font-size: 14px; background: var(--card-2); color: var(--text); line-height: 1.45; }
+.m-capture-input { display: flex; flex-direction: column; gap: 8px; }
+.m-capture-input textarea { width: 100%; resize: none; border: 1px solid var(--border); border-radius: 11px; padding: 9px 11px; font-size: 14px; background: var(--card-2); color: var(--text); line-height: 1.45; }
 .m-capture-input textarea:focus { outline: none; border-color: var(--primary); }
-.m-capture-btn { flex: 0 0 auto; width: 38px; height: 38px; border-radius: 11px; border: 1px solid var(--border); background: var(--card-2); color: var(--muted); display: grid; place-items: center; }
-.m-capture-btn .icon { width: 18px; height: 18px; }
+/* 操作行：输入框独占一行后，按钮带文字标签（长辈可发现性）、更大的点击目标；
+   次操作（语音/拍单）靠左，主操作（识别）推到右端 */
+.m-capture-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.m-capture-btn { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; height: 36px; padding: 0 13px; border-radius: 18px; border: 1px solid var(--border); background: var(--card-2); color: var(--muted); font-size: 13px; }
+.m-capture-btn .icon { width: 16px; height: 16px; }
+.m-capture-btn span { white-space: nowrap; }
+.m-capture-actions .m-capture-btn.primary { margin-left: auto; padding: 0 16px; }
 .m-capture-btn.primary { background: var(--primary); border-color: transparent; color: #fff; }
 .m-capture-btn.listening { color: #f5222d; animation: aiMicPulse 1.2s ease-in-out infinite; }
 .m-thumbs { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
