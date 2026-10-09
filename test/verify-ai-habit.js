@@ -134,6 +134,15 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   check('分类带「按习惯推荐」标记', itC.category_recommended === true, String(itC.category_recommended));
   check('商户解析与种子一致（走同一 cleanMerchant）', itC.merchant === merchantC, `${itC.merchant} vs ${merchantC}`);
 
+  /* --- C2. 习惯摘要进提示词（方案 B）：buildContext 提炼、buildUserPrompt 按需附带 --- */
+  const ctxHabit = aiLib.buildContext(ledgerId);
+  check('习惯摘要含 分类→常用账户（餐饮/午餐→微信钱包）', /餐饮\/午餐→微信钱包/.test(ctxHabit.habits || ''), ctxHabit.habits);
+  check('习惯摘要含 商户→常记分类（测试面馆）', /测试面馆→/.test(ctxHabit.habits || ''), ctxHabit.habits);
+  const promptHabit = aiLib.buildUserPrompt({ text: '午饭 40', ctx: ctxHabit, today: db.todayStr() });
+  check('提示词附带习惯参考行', promptHabit.includes('该用户的历史习惯') && promptHabit.includes('午餐→微信钱包'));
+  const promptEmpty = aiLib.buildUserPrompt({ text: 'x', ctx: aiLib.buildContext(99999), today: db.todayStr() });
+  check('无历史时不附习惯行', !promptEmpty.includes('历史习惯'));
+
   /* --- D. 悬浮球自动入库也走习惯账户 --- */
   const wechatBalance0 = Number(acc('微信钱包').balance_cents);
   const chat = await req('POST', '/api/ai/chat', { json: { text: '奶茶 18 元' }, cookie });

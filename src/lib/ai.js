@@ -401,7 +401,58 @@ function buildContext(ledgerId) {
     `SELECT u.display_name AS name FROM ledger_members m JOIN users u ON u.id = m.user_id WHERE m.ledger_id = ?`,
     ledgerId
   );
-  return { cats, expensePaths, incomePaths, accounts, members };
+  return { cats, expensePaths, incomePaths, accounts, members, habits: buildHabitSummary(ledgerId) };
+}
+
+/**
+ * 习惯摘要（方案 B）：从本账本近 90 天历史提炼「分类→常用账户」「商户→常记分类」，
+ * 拼进提示词让模型在源头就对齐用户的记法（如「截图写银行卡支付该记哪张卡」）。
+ * 单一出现不算习惯（至少 2 次），条数设上限避免提示词膨胀；与 normalizeItem 的
+ * 统计兜底（方案 A）叠加：模型若仍臆造账户，原文核验 + 兜底链会接住。
+ */
+function buildHabitSummary(ledgerId) {
+  const since = habitSince();
+  const pathOf = (r) => (r.parent ? `${r.parent}/${r.cname}` : r.cname);
+  const catRows = all(
+    `SELECT c.name AS cname, p.name AS parent, a.name AS aname, COUNT(*) AS c
+     FROM transactions t
+     JOIN categories c ON c.id = t.category_id
+     LEFT JOIN categories p ON p.id = c.parent_id
+     JOIN accounts a ON a.id = t.account_id
+     WHERE t.ledger_id = ? AND t.deleted_at IS NULL AND t.txn_date >= ?
+       AND t.category_id IS NOT NULL AND t.account_id IS NOT NULL AND t.type IN ('expense','income')
+     GROUP BY t.category_id, t.account_id
+     ORDER BY t.category_id, c DESC`,
+    ledgerId, since
+  );
+  const topAccountByCat = new Map();
+  for (const r of catRows) if (!topAccountByCat.has(pathOf(r))) topAccountByCat.set(pathOf(r), r);
+  const catHints = [...topAccountByCat.values()].filter((r) => r.c >= 2)
+    .sort((x, y) => y.c - x.c).slice(0, 6)
+    .map((r) => `${pathOf(r)}→${r.aname}`);
+
+  const merchRows = all(
+    `SELECT t.merchant, c.name AS cname, p.name AS parent, COUNT(*) AS c
+     FROM transactions t
+     JOIN categories c ON c.id = t.category_id
+     LEFT JOIN categories p ON p.id = c.parent_id
+     WHERE t.ledger_id = ? AND t.deleted_at IS NULL AND t.txn_date >= ?
+       AND t.merchant IS NOT NULL AND t.merchant != '' AND t.category_id IS NOT NULL
+       AND t.type IN ('expense','income')
+     GROUP BY t.merchant, t.category_id
+     ORDER BY t.merchant, c DESC`,
+    ledgerId, since
+  );
+  const topCatByMerch = new Map();
+  for (const r of merchRows) if (!topCatByMerch.has(r.merchant)) topCatByMerch.set(r.merchant, r);
+  const merchHints = [...topCatByMerch.values()].filter((r) => r.c >= 2)
+    .sort((x, y) => y.c - x.c).slice(0, 5)
+    .map((r) => `${r.merchant}→${pathOf(r)}`);
+
+  const parts = [];
+  if (catHints.length) parts.push(`分类→常用账户：${catHints.join('、')}`);
+  if (merchHints.length) parts.push(`商户→常记分类：${merchHints.join('、')}`);
+  return parts.join('；');
 }
 
 const SYSTEM_PROMPT = `你是一个专业的记账助手，负责把「账单截图」或「账单文字」转换成结构化记账数据。
@@ -423,6 +474,7 @@ function buildUserPrompt({ text, ctx, today }) {
     `可选支出分类（完整路径）：${ctx.expensePaths.join('、')}`,
     `可选收入分类（完整路径）：${ctx.incomePaths.join('、')}`,
     `可用账户：${ctx.accounts.map((a) => a.name).join('、') || '（无）'}`,
+    ...(ctx.habits ? [`该用户的历史习惯（从其过往记账统计得出，仅供参考；账单原文有明确信息的以原文为准）：${ctx.habits}`] : []),
     `账本成员：${ctx.members.map((m) => m.name).join('、') || '（无）'}`,
     text ? `需要识别的账单文字：\n${text}` : '请识别随附的账单截图。若有多张图片，请合并提取所有交易。',
   ].join('\n');
@@ -758,7 +810,7 @@ module.exports = {
   getAiConfig, isAiReady, isAiUsable, isLocalUrl, analyzeBill, testConnection,
   classifyByKeywords, guessAccountName, parseDateWords, parseTextByRules,
   resolveCategoryId, resolveAccountId, normalizeItem, buildContext,
-  habitAccountId, habitCategoryId,
+  habitAccountId, habitCategoryId, buildHabitSummary, buildUserPrompt,
   extractAmount, cleanMerchant, callModel, listModels, guessVision,
   isHeaderSafe, isMaskedSecret, sanitizeSecret,
 };
