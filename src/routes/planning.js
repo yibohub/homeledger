@@ -12,6 +12,28 @@ const router = express.Router();
 
 /* ---------------------------------- 预算 ---------------------------------- */
 
+/** 预算智能建议（P6）：表单选好口径后按近 6 个完整自然月的月均给建议区间。只读，纯统计。 */
+router.get('/api/budgets/suggest', auth.requireLogin, (req, res) => {
+  const ledger = res.locals.ledger;
+  if (!ledger) return res.status(400).json({ ok: false, error: '没有账本' });
+  const ledgerId = Number(ledger.id);
+  const scope = ['overall', 'category', 'account'].includes(req.query.scope) ? req.query.scope : 'overall';
+  const categoryId = req.query.category_id ? Number(req.query.category_id) : null;
+  const validCat = categoryId && get('SELECT id FROM categories WHERE id = ? AND (ledger_id IS NULL OR ledger_id = ?)', categoryId, ledgerId);
+  const accountId = req.query.account_id ? Number(req.query.account_id) : null;
+  const validAcc = accountId && get('SELECT id FROM accounts WHERE id = ? AND ledger_id = ?', accountId, ledgerId);
+  res.json({
+    ok: true,
+    suggestion: sch.budgetSuggestion({
+      ledger_id: ledgerId,
+      scope: scope === 'category' && !validCat ? 'overall' : scope === 'account' && !validAcc ? 'overall' : scope,
+      category_id: validCat ? categoryId : null,
+      account_id: validAcc ? accountId : null,
+      trigger_type: req.query.trigger_type === 'income' ? 'income' : 'expense',
+    }),
+  });
+});
+
 router.get('/budgets', auth.requireLogin, (req, res) => {
   const ledger = res.locals.ledger;
   if (!ledger) return res.redirect('/');

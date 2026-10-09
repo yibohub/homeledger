@@ -128,6 +128,47 @@
     });
   }
 
+  /* --------------------------- 语音输入（P3） --------------------------- */
+  /* Web Speech API（Chrome/Edge/Android Safari）：转写文本只回显到输入框可改，
+     不自动发送；录音不落盘不上传，出网的只有最终确认的文本（走既有识别管线）。
+     不支持的浏览器（如 iOS Safari）按钮保持隐藏，用系统键盘听写即可。 */
+  const micBtn = $('aiMic');
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (micBtn && SR) {
+    micBtn.hidden = false;
+    let rec = null;
+    let listening = false;
+    micBtn.addEventListener('click', () => {
+      if (listening) { try { rec.stop(); } catch { /* ignore */ } return; }
+      rec = new SR();
+      rec.lang = 'zh-CN';
+      rec.interimResults = true;
+      rec.continuous = false;
+      const base = textEl.value.trim();
+      rec.onresult = (e) => {
+        let s = '';
+        for (let i = 0; i < e.results.length; i++) s += e.results[i][0].transcript;
+        textEl.value = base ? base + '，' + s : s;
+        textEl.dispatchEvent(new Event('input'));
+      };
+      rec.onend = () => {
+        listening = false;
+        micBtn.classList.remove('listening');
+        micBtn.title = '语音输入';
+        textEl.focus();
+      };
+      rec.onerror = (e) => {
+        if (e.error !== 'no-speech' && e.error !== 'aborted') {
+          addBubble('bot error', '语音识别失败（' + esc(e.error) + '），也可以直接打字');
+        }
+      };
+      listening = true;
+      micBtn.classList.add('listening');
+      micBtn.title = '停止并填入';
+      try { rec.start(); } catch { listening = false; micBtn.classList.remove('listening'); }
+    });
+  }
+
   /* ------------------------------ 气泡 ------------------------------ */
   function addBubble(cls, html) {
     const d = document.createElement('div');

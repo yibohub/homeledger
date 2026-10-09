@@ -63,10 +63,15 @@ const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
   check('总览页渲染助手面板', r.text.includes('id="aiPanel"') && r.text.includes('id="aiMsgs"'));
   check('面板带状态提示（已连接或规则解析）', r.text.includes('规则解析') || r.text.includes('AI 模型已连接'));
   check('layout 引入 assistant.js', r.text.includes('/static/js/assistant.js'));
+  const layoutHtml = r.text; // 总览页 HTML（悬浮球挂载处）
   r = await req('GET', '/static/js/assistant.js');
   check('assistant.js 可访问', r.status === 200 && r.text.includes('/api/ai/chat'), `HTTP ${r.status}`);
+  check('语音输入（P3）：面板含麦克风按钮且默认隐藏（不支持浏览器不留死按钮）', layoutHtml.includes('id="aiMic"') && /id="aiMic"[^>]*hidden/.test(layoutHtml), '');
+  check('语音输入（P3）：转写逻辑挂载 Web Speech + 中文', r.text.includes('SpeechRecognition') && r.text.includes('zh-CN'), '');
+  check('语音输入（P3）：转写只回显不自动发送', /textEl\.value\s*=/.test(r.text) && !/send\(\)[;,]?\s*\n?\s*rec\.start/.test(r.text), '');
   r = await req('GET', '/static/css/app.css');
   check('助手样式已发布', r.status === 200 && r.text.includes('.ai-fab') && r.text.includes('.ai-bubble'));
+  check('语音录音中样式已发布', r.text.includes('.ai-icon-btn.listening') || r.text.includes('aiMicPulse'), '');
 
   /* --- 参数校验 --- */
   r = await req('POST', '/api/ai/chat', { json: { text: '   ' }, cookie });
