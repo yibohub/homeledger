@@ -121,8 +121,10 @@ const stub = http.createServer((req, res) => {
 
   console.log(`\n=== 结果：${pass} 通过 / ${fail} 失败 ===`);
   stub.close();
-  process.exit(fail ? 1 : 0);
+  // 不直接 process.exit：undici keep-alive 连接还在池里时强退，Windows 上会偶发 libuv 断言崩溃（UV_HANDLE_CLOSING）。
+  // 置 exitCode 让进程等连接自然关闭后退出（服务器 keep-alive 超时约 5s）。
+  process.exitCode = fail ? 1 : 0;
 })().catch((e) => {
   console.error('脚本异常：', e);
-  process.exit(1);
+  process.exitCode = 1;
 });

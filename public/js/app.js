@@ -471,8 +471,8 @@
             '<div class="field d-type-wrap"><label>类型</label><select class="d-type">' +
               ['expense', 'income', 'transfer'].map((t) => '<option value="' + t + '"' + (t === it.type ? ' selected' : '') + '>' + ({ expense: '支出', income: '收入', transfer: '转账' }[t]) + '</option>').join('') +
             '</select></div>' +
-            '<div class="field"><label>分类</label><select class="d-category"></select></div>' +
-            '<div class="field"><label>账户</label><select class="d-account"></select></div>' +
+            '<div class="field"><label>分类' + (it.category_recommended ? ' <span class="ai-hint">按习惯推荐</span>' : '') + '</label><select class="d-category"></select></div>' +
+            '<div class="field"><label>账户' + (it.account_recommended ? ' <span class="ai-hint">按习惯推荐</span>' : '') + '</label><select class="d-account"></select></div>' +
             '<div class="field"><label>商家 / 备注</label><input type="text" class="d-note" value="' + esc((it.merchant || '') + (it.note && it.note !== it.merchant ? ' ' + it.note : '')) + '"></div>' +
           '</div>' +
         '</div>';

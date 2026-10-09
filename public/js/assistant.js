@@ -45,6 +45,36 @@
   $('aiClear').addEventListener('click', () => {
     while (msgs.children.length > 1) msgs.removeChild(msgs.lastChild);
   });
+
+  /* ---------------------- AI 入账撤销（后悔药） ---------------------- */
+  // 事件委托挂 msgs 上：每个结果气泡里的「撤销」按钮都走这里
+  msgs.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.ai-undo');
+    if (!btn || btn.disabled) return;
+    const ids = (btn.dataset.ids || '').split(',').map(Number).filter(Boolean);
+    if (!ids.length) return;
+    btn.disabled = true;
+    btn.textContent = '撤销中…';
+    try {
+      const res = await fetch('/api/ai/undo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf, Accept: 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        btn.textContent = `已撤销 ${data.undone} 笔` + (data.skipped ? `（${data.skipped} 笔无法撤销）` : '');
+        btn.classList.add('done');
+      } else {
+        // 服务端拒绝（超时/来源不符等）时恢复可点，让用户换ID或放弃由自己决定
+        btn.disabled = false;
+        btn.textContent = data.error || '撤销失败，点击重试';
+      }
+    } catch {
+      btn.disabled = false;
+      btn.textContent = '网络异常，点击重试';
+    }
+  });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !panel.classList.contains('hidden')) close();
   });
@@ -132,8 +162,13 @@
       for (const it of data.items) {
         const income = it.type === 'income';
         const title = it.merchant || it.note || (income ? '一笔收入' : '一笔支出');
-        const sub = [it.category_path || '未分类', it.account_name_resolved, it.txn_date]
-          .filter(Boolean).map(esc).join(' · ');
+        const sub = [
+          it.category_path || '未分类',
+          it.account_name_resolved
+            ? it.account_name_resolved + (it.account_recommended ? '（按习惯）' : it.account_fallback ? '（账本默认）' : '')
+            : '',
+          it.txn_date,
+        ].filter(Boolean).map(esc).join(' · ');
         h += '<div class="ai-record">'
           + `<span class="ico">${income ? '💰' : '💸'}</span>`
           + `<div class="m"><b>${esc(title)}</b><span>${sub}</span></div>`
@@ -143,6 +178,9 @@
       h += '</div>';
       const tag = data.engine === 'llm' ? (data.model ? `模型 ${data.model}` : 'AI 识别') : '规则解析';
       h += `<div class="ai-meta"><span>已记 ${data.created} 笔</span><span>·</span><span>${esc(tag)}</span><span>·</span><a href="/transactions">查看明细 →</a></div>`;
+      if (Array.isArray(data.ids) && data.ids.length) {
+        h += `<div class="ai-meta"><button type="button" class="ai-undo" data-ids="${esc(data.ids.join(','))}">↩ 撤销这 ${data.ids.length} 笔</button></div>`;
+      }
     }
     if (data.errors && data.errors.length) {
       h += `<div class="ai-warn">⚠ ${esc(data.errors.join('；'))}</div>`;
