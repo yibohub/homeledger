@@ -558,13 +558,28 @@ function numbersIn(text) {
   return out;
 }
 
+/** 带货币锚点的金额（¥xxx / xxx元/块，可带万）：只有这些是「声称的金额」，
+ *  月份（10月）、笔数（8笔）不算——空数据场景用它防模型凭空编数 */
+function currencyAmountsIn(text) {
+  const s = String(text || '');
+  const out = [];
+  const val = (str, wan) => Math.round(parseFloat(str.replace(/,/g, '')) * (wan ? 10000 : 1) * 100);
+  for (const m of s.matchAll(/[¥￥]\s*([\d,]+(?:\.\d+)?)\s*(万)?/g)) out.push(val(m[1], m[2]));
+  for (const m of s.matchAll(/([\d,]+(?:\.\d+)?)\s*(万)?\s*(?:元|块)/g)) out.push(val(m[1], m[2]));
+  return out.filter(Number.isFinite);
+}
+
 /** 模型叙述是否覆盖全部关键金额；不覆盖就退回模板（确定性优先，与防臆造账户同一模式）。
  *  允许 ±1 元的取整差（模型爱写「约 ¥3461」）：核验的职责是抓「漏说」，不是逼模型抄格式 */
 const ROUND_TOLERANCE_CENTS = 100;
 
 function narrationCovers(data, text) {
   const keys = keyAmountsOf(data);
-  if (!keys.length) return true;
+  if (!keys.length) {
+    // 空数据（无预算/无记录/全零）：没有关键金额可查，但叙述里不允许出现非零的「声称金额」
+    // ——真实 Key 实测模型会在无预算时编「还剩 ¥10000.00」；模板自己的 ¥0.00 放行
+    return currencyAmountsIn(text).every((c) => Math.abs(c) <= ROUND_TOLERANCE_CENTS);
+  }
   const nums = [...numbersIn(text)];
   if (!keys.every((k) => nums.some((n) => Math.abs(n - k) <= ROUND_TOLERANCE_CENTS))) return false;
   // 对比类上期为 0：金额豁免可以，但基数必须口头交代（「上个月没有支出」/「上月 ¥0.00」），
