@@ -134,7 +134,9 @@
      应用自身不落盘、不转发，也不经手音频。不支持的浏览器按钮保持隐藏。 */
   const micBtn = $('aiMic');
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (micBtn && SR) {
+  // isSecureContext 必须同判：Web Speech 在 http:// 非 localhost 下 rec.start() 直接
+  // 报 not-allowed（NAS 经 HTTP/ZeroTier IP 访问即中招），与其让用户点了才报错，不如不亮按钮
+  if (micBtn && SR && window.isSecureContext) {
     micBtn.hidden = false;
     let rec = null;
     let listening = false;
@@ -163,7 +165,9 @@
       rec.onerror = (e) => {
         textEl.readOnly = false; // 保险：个别实现 error 后不派发 end
         if (e.error !== 'no-speech' && e.error !== 'aborted') {
-          addBubble('bot error', '语音识别失败（' + esc(e.error) + '），也可以直接打字');
+          addBubble('bot error', e.error === 'not-allowed'
+            ? '麦克风被浏览器拒绝（需 HTTPS 访问并授权麦克风），可以直接打字或用系统键盘听写'
+            : '语音识别失败（' + esc(e.error) + '），也可以直接打字');
         }
       };
       listening = true;

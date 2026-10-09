@@ -43,9 +43,18 @@ const FEATURES = [
  */
 const CHANGELOG = [
   {
-    version: '1.10.0',
+    version: '1.10.1',
     date: '2026-10-09',
     tag: '当前版本',
+    items: [
+      '修复 NAS 部署后语音按钮报「not-allowed」的体验：根因是 Web Speech API 仅在 HTTPS（安全上下文）可用，HTTP 访问 NAS 时浏览器直接拒绝麦克风——现麦克风按钮在非安全上下文不再出现，错误提示改为对症说明（需 HTTPS + 授权），并沉淀 DSM 反向代理 + 自签证书的解决方案（docs/solutions/deploy-nas.md）',
+    ],
+  },
+
+  {
+    version: '1.10.0',
+    date: '2026-10-09',
+    tag: '',
     items: [
       '语音记账：悬浮球新增麦克风按钮（Web Speech API），说一句「午饭三十五」转写后回显可改、确认再记；可分多次口述，自动以逗号拼接。转写由浏览器自带语音服务完成（Chrome/Edge 下音频经其厂商云端，应用自身不落盘、不转发）；完全不支持 Web Speech 的环境按钮自动隐藏，可用系统键盘听写',
       '录音中输入框暂锁避免转写覆盖手输内容；转写失败给出可读原因，录音中按钮红色呼吸提示',

@@ -35,7 +35,7 @@
 - [ ] 导出 → 回导循环保真（类型列不漂移，v1.4.1 E2E 区）
 
 ### ★ solutions/deploy-nas.md：NAS 部署运维知识沉淀
-群晖 Container Manager 步骤（`user: "0:0"` 缘由）/ 镜像源切换顺序（中转 → DaoCloud → 南大 → 手动 load）/ ZeroTier 组网与 DSM 防火墙 / 备份恢复路径 / 邀请注册流程。内容全在会话记录里，未落盘。
+**已起步**（2026-10-09）：[deploy-nas.md](solutions/deploy-nas.md) 已沉淀语音 not-allowed 根因与 DSM 反代方案、发版到 NAS 标准路径。剩余待补：群晖 Container Manager 步骤（`user: "0:0"` 缘由）/ 镜像源切换顺序（中转 → DaoCloud → 南大 → 手动 load）/ ZeroTier 组网与 DSM 防火墙 / 邀请注册流程。
 
 ### selfcheck-static 版本三件套一致性断言
 `package.json` / `about.js` CHANGELOG 最新条目 / `README.md` 更新记录首条，三处版本号必须一致——防手工漂移。约半小时。

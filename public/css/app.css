@@ -4,6 +4,10 @@
    设计令牌 → 布局骨架 → 通用组件 → 页面部件 → 响应式
    ============================================================ */
 
+/* hidden 属性的全局防御：组件类若显式声明 display（如 .ai-icon-btn 的 grid），
+   会压过 UA 样式对 hidden 的 display:none——按钮该藏没藏还变成死按钮（PR #8 审查抓到） */
+[hidden] { display: none !important; }
+
 :root {
   /* 中性色（冷灰调） */
   --bg: #f3f5f9;

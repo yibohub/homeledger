@@ -107,6 +107,7 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   /* --- 静态资源 --- */
   const js = await req('GET', '/static/js/m.js', { ua: PHONE_UA });
   check('m.js 可访问且走草稿确认流', js.status === 200 && js.text.includes('/api/ai/text') && js.text.includes('/api/ai/confirm') && js.text.includes('SpeechRecognition'), `HTTP ${js.status}`);
+  check('m.js 语音同样要求安全上下文（HTTP 下不亮按钮）', js.status === 200 && js.text.includes('window.isSecureContext'), '');
   const css = await req('GET', '/static/css/app.css', { ua: PHONE_UA });
   check('极简样式已发布', css.status === 200 && css.text.includes('.m-tabbar') && css.text.includes('.m-draft'), `HTTP ${css.status}`);
 
