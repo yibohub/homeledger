@@ -19,6 +19,7 @@
 ## 🎯 进行中
 
 ### v1.9.0 发版收尾（等维护者操作，P2 合并后）
+> 逐版登记台账（含 v1.8.0 同样待打 tag）：[versions.md](versions.md)；发版后把 ⏳ 改 ✅
 - [ ] 推 `v1.9.0` 标签（手动：`git tag v1.9.0 && git push origin v1.9.0`）→ CI 构建双架构镜像并发布 GHCR
 - [ ] GHCR 包设为 Public（网页一次性：头像 → Packages → homeledger → Change visibility）
 - [ ] NAS compose 切镜像 `ghcr.milu.moe/yibohub/homeledger:latest` → `docker compose pull && up -d`

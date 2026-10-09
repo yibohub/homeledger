@@ -60,4 +60,4 @@ DATA_DIR=./data-demo node scripts/seed-demo.js   # 演示数据（独立目录�
 - Windows 下删除数据目录前先停持有它的进程（文件锁）
 
 ---
-指针：协作细则见 `docs/collaboration.md`；路线图与开放问题见 `docs/ai-roadmap.md`；踩坑见 `docs/solutions/`
+指针：协作细则见 `docs/collaboration.md`；路线图与开放问题见 `docs/ai-roadmap.md`；版本登记台账与发版状态见 `docs/versions.md`；踩坑见 `docs/solutions/`
