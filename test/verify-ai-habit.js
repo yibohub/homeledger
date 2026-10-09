@@ -68,6 +68,14 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   r = await req('GET', '/');
   csrf = (r.text.match(/name="csrf" content="([^"]+)"/) || [])[1] || '';
 
+  /* --- 零历史兜底：没有任何习惯时，悬浮球落到账本第一个账户并带「账本默认」标记 --- */
+  const cashAcc = db.get('SELECT id, name FROM accounts WHERE ledger_id = ? AND name = ?', 1, '现金');
+  r = await req('POST', '/api/ai/chat', { json: { text: '地铁 5 元' }, cookie });
+  const itFallback = (r.json.items || [])[0] || {};
+  check('零历史时自动入账落到第一个账户（现金）', Number(itFallback.account_id) === Number(cashAcc.id), `account_id=${itFallback.account_id}`);
+  check('零历史兜底带 account_fallback 标记', itFallback.account_fallback === true, String(itFallback.account_fallback));
+  check('零历史兜底不冒充习惯推荐', itFallback.account_recommended !== true, String(itFallback.account_recommended));
+
   /* --- 种子：同一分类连续 3 笔都记在微信钱包 --- */
   const ledgerId = 1;
   const user = db.get('SELECT id FROM users WHERE username = ?', 'admin');
@@ -99,6 +107,17 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   const itB = (r.json.items || [])[0] || {};
   check('明确支付方式识别为支付宝', Number(itB.account_id) === Number(alipay.id), `account_id=${itB.account_id}`);
   check('明确支付方式不带习惯标记', itB.account_recommended !== true, String(itB.account_recommended));
+
+  /* --- B2. 模型臆造账户（纯文字识别）：原文无据 → 丢弃并按习惯推荐；原文有据 → 以原文为准 --- */
+  const llmRaw = { type: 'expense', amount: 40, txn_date: db.todayStr(), category_name: '餐饮/午餐', acct: '现金', confidence: 1 };
+  const itB1 = aiLib.normalizeItem(llmRaw, ledgerId, { sourceText: '早餐 40' });
+  check('模型臆造账户被丢弃并按习惯推荐微信钱包', Number(itB1.account_id) === Number(wechat.id) && itB1.account_recommended === true,
+    `account_id=${itB1.account_id} rec=${itB1.account_recommended}`);
+  const itB2 = aiLib.normalizeItem(llmRaw, ledgerId, { sourceText: '早餐 40 现金' });
+  check('原文明确写现金时仍以原文为准', Number(itB2.account_id) === Number(cashAcc.id) && itB2.account_recommended !== true,
+    `account_id=${itB2.account_id}`);
+  const itB3 = aiLib.normalizeItem(llmRaw, ledgerId, {});
+  check('无 sourceText（截图识别）保持原行为信任模型', Number(itB3.account_id) === Number(cashAcc.id), `account_id=${itB3.account_id}`);
 
   /* --- C. 商户→分类习惯：关键词表猜不中的商户，用商户历史补分类 --- */
   const textC = '蓝月亮旗舰店 59元';

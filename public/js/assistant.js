@@ -163,7 +163,9 @@
         const title = it.merchant || it.note || (income ? '一笔收入' : '一笔支出');
         const sub = [
           it.category_path || '未分类',
-          it.account_name_resolved ? it.account_name_resolved + (it.account_recommended ? '（按习惯）' : '') : '',
+          it.account_name_resolved
+            ? it.account_name_resolved + (it.account_recommended ? '（按习惯）' : it.account_fallback ? '（账本默认）' : '')
+            : '',
           it.txn_date,
         ].filter(Boolean).map(esc).join(' · ');
         h += '<div class="ai-record">'

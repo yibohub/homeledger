@@ -412,7 +412,7 @@ const SYSTEM_PROMPT = `你是一个专业的记账助手，负责把「账单截
 4. 日期格式 YYYY-MM-DD；若截图只有月日则补齐为今年；无法确定则用今天。
 5. type 只能取：expense（支出）、income（收入）、transfer（转账）。
 6. category_name 必须从给定的分类列表中选择最贴近的「完整路径」，若都不合适则选「其他支出/其他」这类兜底项。
-7. 若能识别出付款方式，acct 填对应账户名。
+7. 只有账单原文里明确写出了付款方式（如「支付宝」「微信」「现金」「银行卡」等字样），acct 才填对应账户名；原文没有提到付款方式时 acct 必须留空字符串，绝不要猜测或按常识默认。
 8. confidence 为 0~1 的小数，表示你对这笔提取的把握。
 输出格式：
 {"items":[{"type":"expense","amount":35.00,"txn_date":"2026-09-15","merchant":"肯德基","note":"午餐","category_name":"餐饮/午餐","acct":"支付宝","currency":"CNY","confidence":0.95}]}`;
@@ -479,6 +479,22 @@ function resolveAccountId(ledgerId, nameHint) {
   return null;
 }
 
+/**
+ * 账户提示是否在原文里有依据。
+ * 纯文字识别时，大模型经常在原文没提付款方式的情况下自行编一个 acct（confidence 还给 1），
+ * 而「识别结果优先于习惯推荐」的设计会让这种猜测顶掉习惯。这里用账户名 / 关键词族
+ * （支付宝|花呗、微信|零钱通、现金|钞…）回原文核验，核验不过就当作模型没给账户。
+ */
+function textMentionsAccount(text, nameHint) {
+  const s = String(text || '');
+  const h = String(nameHint || '').replace(/\s/g, '');
+  if (!s || !h) return false;
+  for (const [re, family] of ACCOUNT_KEYWORDS) {
+    if (h.includes(String(family).replace(/\s/g, '')) && re.test(s)) return true;
+  }
+  return false;
+}
+
 /* ------------------------- 习惯记忆（本地统计推荐） ------------------------- */
 
 /** 习惯统计的时间窗：只看最近 90 天，「最近的习惯」才代表现在 */
@@ -540,8 +556,8 @@ function habitCategoryId(ledgerId, merchant, type = 'expense') {
   return row ? Number(row.category_id) : null;
 }
 
-/** 规范化单条草稿 */
-function normalizeItem(raw, ledgerId) {
+/** 规范化单条草稿；sourceText 给出时（纯文字识别），模型给的账户需在原文中有依据，否则交给习惯推荐 */
+function normalizeItem(raw, ledgerId, { sourceText = '' } = {}) {
   const type = ['expense', 'income', 'transfer'].includes(raw.type) ? raw.type : 'expense';
   const kind = type === 'income' ? 'income' : 'expense';
   const amountCents = Number.isFinite(Number(raw.amount_cents))
@@ -561,7 +577,12 @@ function normalizeItem(raw, ledgerId) {
     }
     if (!categoryId) categoryId = resolveCategoryId(ledgerId, kind === 'income' ? '其他收入' : '其他支出', kind);
   }
-  const accountId = resolveAccountId(ledgerId, raw.acct || raw.account || raw.account_name);
+  const acctHint = raw.acct || raw.account || raw.account_name;
+  let accountId = resolveAccountId(ledgerId, acctHint);
+  if (accountId && sourceText && !textMentionsAccount(sourceText, acctHint)) {
+    // 模型臆造的账户：原文没有依据，丢弃后走习惯推荐（截图识别不受此约束——模型真的看到了账单）
+    accountId = null;
+  }
   // 账户识别不出 → 习惯推荐补位（此时 categoryId 可能刚由习惯/关键词得出，正好作为推荐依据）
   const accountRec = !accountId ? habitAccountId(ledgerId, { categoryId, merchant, type }) : null;
   return {
@@ -576,7 +597,7 @@ function normalizeItem(raw, ledgerId) {
     category_name: catName,
     category_recommended: categoryRecommended,
     account_id: accountId || accountRec,
-    account_name: raw.acct || raw.account || raw.account_name || null,
+    account_name: acctHint || null,
     account_recommended: !accountId && !!accountRec,
     confidence: Number.isFinite(Number(raw.confidence)) ? Number(raw.confidence) : 0.8,
     raw,
@@ -624,7 +645,7 @@ async function analyzeBill({ images = [], text = '', ledgerId }) {
         return {
           engine: 'llm',
           model: cfg.model,
-          items: items.map((it) => normalizeItem(it, ledgerId)),
+          items: items.map((it) => normalizeItem(it, ledgerId, { sourceText: images.length ? '' : text })),
           warnings,
         };
       }
@@ -640,7 +661,7 @@ async function analyzeBill({ images = [], text = '', ledgerId }) {
 
   // 2) 规则兜底
   if (text) {
-    const items = parseTextByRules(text, { today }).map((it) => normalizeItem(it, ledgerId));
+    const items = parseTextByRules(text, { today }).map((it) => normalizeItem(it, ledgerId, { sourceText: text }));
     if (items.length) return { engine: 'rule', model: null, items, warnings };
   }
   return { engine: 'rule', model: null, items: [], warnings };

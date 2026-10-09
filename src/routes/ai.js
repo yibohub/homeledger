@@ -171,6 +171,7 @@ router.post('/api/ai/chat', auth.requireLogin, auth.requireLedgerWrite, async (r
       return {
         ...it,
         account_id: accountId,
+        account_fallback: !it.account_id && accountId != null,
         category_path: categories.find((c) => Number(c.id) === Number(it.category_id))?.path || (it.category_name || '未分类'),
         account_name_resolved: accountList.find((a) => Number(a.id) === Number(accountId))?.name || '',
       };
