@@ -1,5 +1,6 @@
 <div class="m-page" id="mHome">
-  <script type="application/json" id="mAccounts"><%- JSON.stringify(mAccounts || []) %></script>
+  <% // JSON 内嵌必须转义 <>& 与行分隔符：账户名可含 </script>（开放 API 也能自动建账户），不转义即存储型 XSS %>
+  <script type="application/json" id="mAccounts"><%- JSON.stringify(mAccounts || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029') %></script>
   <!-- 本月大数字 + 预算条 -->
   <section class="m-card m-hero">
     <div class="m-hero-month"><%= monthLabel %></div>

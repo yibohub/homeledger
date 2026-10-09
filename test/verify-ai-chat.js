@@ -70,7 +70,7 @@ const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
   check('语音输入（P3）：转写逻辑挂载 Web Speech + 中文', r.text.includes('SpeechRecognition') && r.text.includes('zh-CN'), '');
   check('语音输入（P3）：转写只回显不自动发送', (() => {
     // 按源码区段截取语音段断言（整文件级的正则会被 send() 函数自身命中，拦不住真回归）
-    const segStart = r.text.indexOf('语音输入（P3）');
+    const segStart = r.text.indexOf('语音输入（P3');
     const segEnd = r.text.indexOf('/* ------------------------------ 气泡');
     const seg = r.text.slice(Math.max(0, segStart), segEnd > segStart ? segEnd : undefined);
     return segStart >= 0 && segEnd > segStart && !/send\s*\(/.test(seg) && /textEl\.value\s*=/.test(seg);

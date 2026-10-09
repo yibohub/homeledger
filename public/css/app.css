@@ -1468,3 +1468,5 @@ html { scroll-behavior: smooth; }
 .m-more-item:last-child { border-bottom: 0; }
 .m-more-item .icon { width: 17px; height: 17px; color: var(--muted); }
 .m-draft-acc { margin-top: 7px; width: 100%; font-size: 13px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); color: var(--text); }
+button.m-more-item { width: 100%; background: none; border: 0; border-bottom: 1px dashed var(--border); cursor: pointer; font: inherit; text-align: left; }
+button.m-more-item.danger { color: var(--expense); }

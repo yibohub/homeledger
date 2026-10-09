@@ -2,7 +2,7 @@
 <html lang="zh-CN" data-theme="<%= (user && user.theme) || 'light' %>">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="csrf" content="<%= csrf %>">
 <meta name="theme-color" content="#3d6df5">
 <meta name="color-scheme" content="light dark">
@@ -34,6 +34,9 @@
   </a>
 </header>
 <main class="m-main">
+  <% if (flash) { %>
+    <div class="flash <%= flash.type %>"><span><%= flash.message %></span></div>
+  <% } %>
 <%- body %>
 </main>
 <nav class="m-tabbar" aria-label="主导航">

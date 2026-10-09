@@ -69,10 +69,15 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
 
   // cookie 显式覆盖：手机 UA + hl_simple=0 → 完整；桌面 UA + hl_simple=1 → 极简
   const save = jar;
-  jar = save + '; hl_simple=0';
+  const setJar = (simple) => {
+    const map = new Map(save.split('; ').filter(Boolean).map((c) => [c.split('=')[0], c.split('=')[1]]));
+    if (simple === null) map.delete('hl_simple'); else map.set('hl_simple', String(simple));
+    jar = [...map.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
+  };
+  setJar(0);
   r = await req('GET', '/', { ua: PHONE_UA });
   check('手机 UA + cookie 关：完整布局', r.status === 200 && !r.text.includes('m-tabbar'), `HTTP ${r.status}`);
-  jar = save + '; hl_simple=1';
+  setJar(1);
   r = await req('GET', '/', { ua: DESKTOP_UA });
   check('桌面 UA + cookie 开：极简布局', r.status === 200 && r.text.includes('data-layout="m"'), `HTTP ${r.status}`);
 
@@ -84,11 +89,17 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
 
   /* --- 其他页面套壳与显式布局豁免 --- */
   r = await req('GET', '/transactions', { ua: PHONE_UA });
-  check('明细页在极简下套 layout-m（Tab2 高亮）', r.status === 200 && r.text.includes('data-layout="m"') && /m-tab[^>]*active[^>]*href="\/transactions"/.test(r.text.replace(/\n/g, '')) || (r.text.includes('data-layout="m"') && r.text.includes('账单明细')), `HTTP ${r.status}`);
+  check('明细页在极简下套 layout-m 且 Tab2 高亮', r.status === 200 && r.text.includes('data-layout="m"')
+    && /<a class="m-tab active" href="\/transactions"/.test(r.text.replace(/\n/g, '')), `HTTP ${r.status}`);
   r = await req('GET', '/more', { ua: PHONE_UA });
   check('「更多」页领域分组（记账/分析/资产与计划/数据/协作与系统）', r.status === 200
     && ['记账', '分析', '资产与计划', '数据', '协作与系统'].every((g) => r.text.includes(g)), `HTTP ${r.status}`);
-  check('「更多」页含「切换完整版」入口', r.text.includes('/ui-mode?simple=0'));
+  check('极简下「更多」页提供「切换完整版」', r.text.includes('/ui-mode?simple=0'));
+  check('「更多」页有退出登录入口（手机共用设备场景）', /action="\/logout"/.test(r.text) && r.text.includes('退出登录'));
+  setJar(0);
+  r = await req('GET', '/more', { ua: PHONE_UA });
+  check('完整模式下「更多」页反向提供「切换极简版」（切换不是单行道）', r.status === 200 && r.text.includes('/ui-mode?simple=1'), `HTTP ${r.status}`);
+  setJar(null);
   check('「更多」页收纳高频入口（记一笔/报表/预算/订阅）', ['/transactions/new', '/reports', '/budgets', '/subscriptions'].every((h) => r.text.includes(`href="${h}"`)));
   r = await req('GET', '/login', { ua: PHONE_UA, noCookie: true });
   check('显式 layout 页面不受极简影响（/login 用 blank 壳）', r.status === 200 && !r.text.includes('m-tabbar'), `HTTP ${r.status}`);
@@ -100,7 +111,19 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   check('极简样式已发布', css.status === 200 && css.text.includes('.m-tabbar') && css.text.includes('.m-draft'), `HTTP ${css.status}`);
 
   /* --- 捕获区草稿确认流（规则引擎端到端）--- */
-  jar = save + '; hl_simple=1';
+  setJar(1);
+  /* XSS 回归（审查 P1）：账户名可含 </script>（开放 API 也能自动建账户），内嵌 JSON 必须转义 */
+  const accPage = await req('GET', '/accounts', { ua: PHONE_UA });
+  const createAcc = await req('POST', '/accounts', {
+    form: { _csrf: csrfOf(accPage.text), name: 'A</script>B', type: 'cash', icon: '💵', initial_balance: '0' },
+    ua: PHONE_UA,
+  });
+  r = await req('GET', '/', { ua: PHONE_UA });
+  {
+    const block = (r.text.match(/id="mAccounts">([\s\S]*?)<\/script>/) || [null, ''])[1];
+    check('含 </script> 的账户名不破坏内嵌 JSON（转义为 \\u003c）', createAcc.status === 302
+      && block.includes('A\\u003c/script\\u003eB') && !block.includes('</script'), `${createAcc.status} | block=${block.slice(0, 60)}`);
+  }
   const home1 = await req('GET', '/', { ua: PHONE_UA });
   const accs = JSON.parse((home1.text.match(/id="mAccounts">([\s\S]*?)<\/script>/) || [null, '[]'])[1]);
   check('首页内嵌账户清单（缺账户草稿的确认依赖）', accs.length >= 1, JSON.stringify(accs).slice(0, 80));

@@ -70,7 +70,7 @@
     });
   }
 
-  /* --------------------------- 语音（与悬浮球同规则） --------------------------- */
+  /* --------------------------- 语音（与悬浮球 assistant.js 同规则；改一处记得同步另一处） --------------------------- */
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (micBtn && SR) {
     micBtn.hidden = false;
@@ -244,11 +244,12 @@
   }
 
   function renderDrafts(data, imageIds) {
-    for (const it of data.items) {
+    // 附件按「数量一致一一对应」的既有约定挂到对应草稿；数量不一致时只有第一张卡携带，
+    // 其余不带——服务端约定是全挂第一笔，多卡都带会让后确认的把附件抢走
+    data.items.forEach((it, idx) => {
       const card = draftCard(it);
-      // 附件按「数量一致一一对应」的既有约定挂到对应草稿；多草稿单图时挂第一张
-      card._imageIds = data.items.length === (imageIds || []).length ? [imageIds[data.items.indexOf(it)]].filter(Boolean) : (imageIds || []).slice(0, 1);
+      card._imageIds = data.items.length === (imageIds || []).length ? [imageIds[idx]].filter(Boolean) : (idx === 0 ? (imageIds || []).slice(0, 1) : []);
       draftsEl.insertBefore(card, draftsEl.firstChild);
-    }
+    });
   }
 })();

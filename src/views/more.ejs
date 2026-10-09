@@ -2,11 +2,15 @@
   <section class="m-card">
     <div class="m-more-head">
       <b>更多功能</b>
+      <% if (minimal) { %>
       <a class="tiny muted" href="/ui-mode?simple=0">切换完整版 →</a>
+      <% } else { %>
+      <a class="tiny muted" href="/ui-mode?simple=1">切换极简版 →</a>
+      <% } %>
     </div>
     <div class="m-more-group">
       <div class="m-more-title">记账</div>
-      <a class="m-more-item" href="/transactions/new"><svg class="icon"><use href="#i-pencil"></use></svg>记一笔</a>
+      <% if (canWrite(ledger.role)) { %><a class="m-more-item" href="/transactions/new"><svg class="icon"><use href="#i-pencil"></use></svg>记一笔</a><% } %>
       <a class="m-more-item" href="/calendar"><svg class="icon"><use href="#i-calendar-days"></use></svg>记账日历</a>
       <a class="m-more-item" href="/ai"><svg class="icon"><use href="#i-bot"></use></svg>AI 截图记账</a>
       <a class="m-more-item" href="/search"><svg class="icon"><use href="#i-search"></use></svg>搜索筛选</a>
@@ -36,6 +40,10 @@
       <a class="m-more-item" href="/members"><svg class="icon"><use href="#i-users-round"></use></svg>成员权限</a>
       <a class="m-more-item" href="/settings"><svg class="icon"><use href="#i-settings"></use></svg>设置</a>
       <a class="m-more-item" href="/about"><svg class="icon"><use href="#i-info"></use></svg>关于</a>
+      <form method="post" action="/logout">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <button class="m-more-item danger" type="submit"><svg class="icon"><use href="#i-log-out"></use></svg>退出登录</button>
+      </form>
     </div>
   </section>
 </div>

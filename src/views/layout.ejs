@@ -89,6 +89,7 @@
         <a class="btn btn-sm btn-icon btn-ghost" href="/theme/<%= (user && user.theme) === 'dark' ? 'light' : 'dark' %>" title="切换主题" aria-label="切换主题">
           <% if ((user && user.theme) === 'dark') { %><svg class="icon sm"><use href="#i-sun"></use></svg><% } else { %><svg class="icon sm"><use href="#i-moon"></use></svg><% } %>
         </a>
+        <a class="tiny muted" href="/ui-mode?simple=1" title="切换到手机极简模式">极简模式</a>
         <span class="spacer"></span>
         <span class="tiny muted"><%= user ? '@' + user.username : '' %></span>
       </div>
