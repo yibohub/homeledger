@@ -17,12 +17,27 @@ const scheduler = require('./scheduler');
 
 /* ------------------------------ 查询信号预筛 ------------------------------ */
 
-/** 疑问/统计信号词：命中才进入查询分支（不命中直接走记账管线，零额外开销） */
+/** 疑问/统计信号词：命中才进入查询分支（不命中直接走记账管线，零额外开销）。
+ *  注意不含裸「谁」——「给谁买的礼物 88」这类记账句常带人称疑问词；
+ *  「谁花得最多」这类真统计问句由「最/排行」覆盖 */
 const QUERY_HINT_RE =
-  /(多少|几笔|几次|哪[个些里]|谁|排名|排行|最[多大少高低快]|top\s?\d*|趋势|走势|环比|同比|对比|比较|还剩|剩多少|超没超|会超|超支|超了|预算|扣了没|扣没扣|扣了吗|到账没|查[一]?[下看询]|看[一]?[下看]|统计|汇总|分析|花在哪|花哪里|花哪|钱去哪|钱花哪)/i;
+  /(多少|几笔|几次|哪[个些里]|排名|排行|最[多大少高低快]|top\s?\d*|趋势|走势|环比|同比|对比|比较|还剩|剩多少|超没超|会超|超支|超了|预算|扣了没|扣没扣|扣了吗|到账没|查[一]?[下看询]|看[一]?[下看]|统计|汇总|分析|花在哪|花哪里|花哪|钱去哪|钱花哪)/i;
+
+/** 强查询词：句子里出现这些才可能是正经查账，金额出现也不转移为记账 */
+const STRONG_QUERY_RE = /(预算|趋势|走势|环比|同比|对比|比较|排行|排名|还剩|超支|超了|平均)/;
+
+/** 记账句尾带金额（「打车多少钱来着 25」「午饭 35 元」）：除非伴随强查询词，一律优先记账。
+ *  无 Key 降级路径的主要误伤面就是这类带金额的口语记账被当成查询吞掉。 */
+const TRAILING_AMOUNT_RE = /\d+(?:\.\d{1,2})?\s*(元|块钱|块|圆|¥|￥)?\s*[。!！?？]?\s*$/;
+
+function isExplicitRecord(text) {
+  const s = String(text || '').trim();
+  return TRAILING_AMOUNT_RE.test(s) && !STRONG_QUERY_RE.test(s);
+}
 
 function looksLikeQuery(text) {
-  return QUERY_HINT_RE.test(String(text || ''));
+  const s = String(text || '');
+  return QUERY_HINT_RE.test(s) && !isExplicitRecord(s);
 }
 
 /* ------------------------------ 查询上下文（本地） ------------------------------ */
@@ -114,10 +129,16 @@ function resolveRange(range, today = todayStr()) {
   if (r.kind === 'months' && Number(r.months) > 0) {
     const n = Math.min(Math.round(Number(r.months)), 24);
     const startMonth = shiftMonth(thisMonth, -(n - 1));
+    // 上一期与本期等长（本期含「至今」的零头天数）：月中问「近三个月比之前三个月」才不会
+    // 拿 70 天比 92 天，系统性得出「少花」的结论
+    const ps = new Date(`${monthStart(startMonth)}T00:00:00Z`);
+    const pe = new Date(`${today}T00:00:00Z`);
+    const diffDays = Math.round((pe - ps) / 86400000); // 本期含头含尾共 diffDays+1 天
     const prevStartMonth = shiftMonth(startMonth, -n);
+    const prevEnd = new Date(new Date(`${monthStart(prevStartMonth)}T00:00:00Z`).getTime() + diffDays * 86400000);
     return {
       start: monthStart(startMonth), end: today, label: `近 ${n} 个月`,
-      prev: { start: monthStart(prevStartMonth), end: monthEnd(shiftMonth(prevStartMonth, n - 1)), label: `之前 ${n} 个月` },
+      prev: { start: monthStart(prevStartMonth), end: prevEnd.toISOString().slice(0, 10), label: `之前 ${n} 个月` },
     };
   }
   if (r.kind === 'between' && /^\d{4}-\d{2}-\d{2}$/.test(String(r.from)) && /^\d{4}-\d{2}-\d{2}$/.test(String(r.to))) {
@@ -187,6 +208,12 @@ function parseRangeByRules(text, today) {
   // 文本里两个词都会出现，按先出现谁就归谁会错挂到上月
   if (/这(个)?月|本(个)?月/.test(s)) return { kind: 'month', month: thisMonth };
   if (/上(个)?月|上一月/.test(s)) return { kind: 'month', month: shiftMonth(thisMonth, -1) };
+  // 显式年月要先于裸月份判：「2025年12月」若走 (\d{1,2})月 会丢掉年份、错算成今年 12 月
+  if ((m = s.match(/((?:19|20)\d{2})\s*[-/.年]?\s*(\d{1,2})\s*月/))) {
+    const y = Number(m[1]);
+    const mm = Number(m[2]);
+    if (mm >= 1 && mm <= 12) return { kind: 'month', month: `${y}-${pad(mm)}` };
+  }
   if ((m = s.match(/(去年|今年)?(\d{1,2})月/))) {
     const y = m[1] === '去年' ? year - 1 : year;
     const mm = Number(m[2]);
@@ -416,10 +443,16 @@ function runQuery(ledgerId, q, range, today = todayStr()) {
     }
     case 'top': {
       if (q.by === 'member') {
-        const rows = txn.memberBreakdown(ledgerId, range.start, range.end)
-          .sort((a, b) => (metric === 'income' ? b.income - a.income : b.expense - a.expense))
-          .slice(0, q.top_n || 3)
-          .map((r) => ({ name: r.name, total: metric === 'income' ? r.income : r.expense, count: r.cnt }));
+        // 不复用 txn.memberBreakdown：它的 COUNT(*) 不滤类型（转账/借贷也计数），
+        // 会让「某 N 笔」虚高且与分类榜口径不一致；这里金额与笔数同口径过滤
+        const rows = all(
+          `SELECT u.display_name AS name, SUM(t.amount_base_cents) AS total, COUNT(*) AS cnt
+           FROM transactions t JOIN users u ON u.id = t.user_id
+           WHERE t.ledger_id = ? AND t.deleted_at IS NULL AND t.txn_date BETWEEN ? AND ?
+             AND t.type IN (${typesOf(metric).map(() => '?').join(',')})
+           GROUP BY u.id ORDER BY total DESC LIMIT ?`,
+          ledgerId, range.start, range.end, ...typesOf(metric), Math.min(q.top_n || 3, 10)
+        ).map((rw) => ({ name: rw.name, total: Number(rw.total), count: Number(rw.cnt) }));
         return { type: 'top', by: 'member', metric, label: range.label, top_n: q.top_n || 3, rows };
       }
       const rows = txn.categoryBreakdown(ledgerId, range.start, range.end, metric === 'income' ? 'income' : 'expense')
@@ -462,7 +495,7 @@ function runQuery(ledgerId, q, range, today = todayStr()) {
         type: 'merchant', metric, keyword, label: range.label, confirm: !!q.confirm,
         total: metric === 'income' ? r.sum.income : r.sum.expense,
         count: r.total,
-        latest: r.rows[0] ? { date: r.rows[0].txn_date, amount: Number(r.rows[0].amount_base_cents), note: r.rows[0].note || r.rows[0].merchant || '' } : null,
+        latest: r.rows[0] ? { date: r.rows[0].txn_date, amount: Number(r.rows[0].amount_base_cents), note: String(r.rows[0].note || r.rows[0].merchant || '').slice(0, 50) } : null,
       };
     }
     default:
@@ -565,7 +598,9 @@ async function handleAssistantText({ text, ledgerId, today = todayStr() }) {
     try {
       const mp = await parseQueryByModel(q, ctx, today, cfg);
       if (mp && mp.intent === 'record') return null; // 模型确认是记账 → 交回记账管线
-      if (mp && mp.intent === 'query' && mp.query) {
+      // 低置信的 query 判定不采纳（confidence 缺省视为可信），沿用规则解析结果
+      const confOk = mp && (mp.confidence === undefined || Number(mp.confidence) >= 0.5);
+      if (mp && confOk && mp.intent === 'query' && mp.query) {
         const nq = normalizeModelQuery(mp.query, ctx, ledgerId, today);
         if (nq) {
           parsed = { query: nq };
@@ -598,7 +633,7 @@ async function handleAssistantText({ text, ledgerId, today = todayStr() }) {
 }
 
 module.exports = {
-  looksLikeQuery, buildQueryContext, matchQueryByRules, parseRangeByRules,
+  looksLikeQuery, isExplicitRecord, buildQueryContext, matchQueryByRules, parseRangeByRules,
   resolveRange, normalizeModelQuery, runQuery, narrateTemplate,
   handleAssistantText, QUERY_HINT_RE, CLARIFY_TEXT,
 };

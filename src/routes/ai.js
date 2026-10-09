@@ -173,7 +173,10 @@ router.post('/api/ai/chat', auth.requireLogin, async (req, res) => {
       }
     }
 
-    /* ---- 记账分支：需要可写权限 ---- */
+    /* ---- 记账分支：需要可写权限（归档账本只读，与旧 requireLedgerWrite 语义一致） ---- */
+    if (ledger.is_archived) {
+      return res.status(403).json({ ok: false, error: '该账本已归档（只读），请先在「账本管理」中恢复后再记账' });
+    }
     if (!auth.canWrite(ledger.role)) {
       return res.status(403).json({ ok: false, error: '你在该账本中只有只读权限，不能记账，但可以直接提问查账（如「这个月餐饮花了多少」）' });
     }

@@ -51,12 +51,18 @@ const monthEndOf = (month) => {
 
 console.log('\n=== A1. 查询信号预筛（像问句才进查询分支）===\n');
 
-for (const t of ['这个月餐饮花了多少', '房贷扣了没', '这个月比上个月多花多少', '钱都花哪了', '餐饮预算还剩多少', '查一下上个月的美团']) {
+for (const t of ['这个月餐饮花了多少', '房贷扣了没', '这个月比上个月多花多少', '钱都花哪了', '餐饮预算还剩多少', '查一下上个月的美团', '谁花得最多']) {
   check(`查询句命中信号：${t}`, aiAsk.looksLikeQuery(t));
 }
 for (const t of ['午饭 35 元', '昨天打车 26.5', '转账给张三 500', '房贷 3200 元']) {
   check(`记账句不误判：${t}`, !aiAsk.looksLikeQuery(t));
 }
+// 审查修复回归：带金额的口语记账句不被查询分支吞掉（无 Key 降级路径的主要误伤面）
+for (const t of ['给谁买的礼物 88', '昨天请谁吃饭来着 120', '打车多少钱来着 25']) {
+  check(`句尾带金额优先记账：${t}`, !aiAsk.looksLikeQuery(t));
+}
+check('强查询词例外：预算句即使带金额也走查账', aiAsk.looksLikeQuery('餐饮预算还剩多少来着'));
+check('isExplicitRecord：句尾数字（无单位）也算记账', aiAsk.isExplicitRecord('打车 25') && !aiAsk.isExplicitRecord('这个月花了多少'));
 
 console.log('\n=== A2. 规则意图解析（五类问法 + 优先级）===\n');
 
@@ -104,6 +110,16 @@ check('近三月的上一期 = 再往前 3 个自然月', rg.prev.start === mont
 rg = aiAsk.resolveRange({ kind: 'days', days: 7 }, today);
 check('最近 7 天：起点=今天-6', rg.start === shiftDate(today, -6) && rg.end === today, `${rg.start} ~ ${rg.end}`);
 
+/* 审查修复回归：显式年月不再丢年份、近 N 月上一期与本期等长 */
+const ym = aiAsk.parseRangeByRules('2025年12月花了多少', today);
+check('「2025年12月」解析为 2025-12（不丢年份）', ym && ym.month === '2025-12', JSON.stringify(ym));
+const ym2 = aiAsk.parseRangeByRules('去年12月花了多少', today);
+check('「去年12月」解析为去年', ym2 && ym2.month === `${Number(thisMonth.slice(0, 4)) - 1}-12`, JSON.stringify(ym2));
+rg = aiAsk.resolveRange({ kind: 'months', months: 3 }, today);
+const curLen = (new Date(`${rg.end}T00:00:00Z`) - new Date(`${rg.start}T00:00:00Z`)) / 86400000;
+const prevLen = (new Date(`${rg.prev.end}T00:00:00Z`) - new Date(`${rg.prev.start}T00:00:00Z`)) / 86400000;
+check('近三月的上一期与本期等长（不拿 70 天比 92 天）', curLen === prevLen, `本期 ${curLen + 1} 天 vs 上期 ${prevLen + 1} 天`);
+
 console.log('\n=== A4. 模型意图归一化（白名单 + 钳制 + 分类回查）===\n');
 
 const uid = Number(db.run(
@@ -145,6 +161,13 @@ const cmpData = aiAsk.runQuery(ledgerId, cmpQ, aiAsk.resolveRange({ kind: 'month
 check('compare：本月 35 元 vs 上月 50 元，delta -1500 分', cmpData.cur_total === 3500 && cmpData.prev_total === 5000 && cmpData.delta === -1500,
   JSON.stringify({ cur: cmpData.cur_total, prev: cmpData.prev_total }));
 check('对比模板含「少」与两期金额', aiAsk.narrateTemplate(cmpData).includes('少') && aiAsk.narrateTemplate(cmpData).includes('50.00'), aiAsk.narrateTemplate(cmpData));
+
+/* 审查修复回归：成员榜笔数与金额同口径（转账/借贷不计入「N 笔」） */
+const otherAcc = Number(db.get('SELECT id FROM accounts WHERE ledger_id = ? AND id != ? ORDER BY id LIMIT 1', ledgerId, accId).id);
+txn.createTransaction(ledgerId, uid, { type: 'transfer', amount_cents: 10000, account_id: accId, to_account_id: otherAcc, txn_date: `${thisMonth}-13` });
+const memberTop = aiAsk.runQuery(ledgerId, { type: 'top', metric: 'expense', by: 'member', top_n: 3 }, aiAsk.resolveRange({ kind: 'month', month: thisMonth }, today), today);
+check('成员榜：金额 35 元且笔数只计收支（转账不算）', memberTop.rows.length === 1 && memberTop.rows[0].total === 3500 && memberTop.rows[0].count === 1,
+  JSON.stringify(memberTop.rows));
 
 console.log('\n--- 进程内段完成，进入 HTTP 段 ---\n');
 if (fail) { console.log(`\n结果：${pass} 通过 / ${fail} 失败（进程内段未全过，跳过 HTTP 段）\n`); process.exit(1); }
@@ -282,6 +305,17 @@ const noComma = (s) => String(s).replace(/,/g, '');
     raw.close();
     r = await req('POST', '/api/ai/chat', { json: { text: '可乐 6 元' } });
     check('恢复角色后记账正常', r.status === 200 && r.json.mode === 'record' && r.json.created === 1);
+
+    /* 审查修复回归：归档账本只读——记账 403（查询仍可） */
+    const raw2 = new DatabaseSync(dbFile);
+    raw2.exec('PRAGMA busy_timeout = 5000;');
+    raw2.prepare('UPDATE ledgers SET is_archived = 1').run();
+    r = await req('POST', '/api/ai/chat', { json: { text: '薯片 9.9 元' } });
+    check('归档账本记账被 403 拒绝', r.status === 403 && /归档/.test(r.json.error || ''), `HTTP ${r.status} ${r.json && r.json.error}`);
+    r = await req('POST', '/api/ai/chat', { json: { text: '这个月餐饮花了多少' } });
+    check('归档账本查账不受影响（只读）', r.status === 200 && r.json.mode === 'answer', `HTTP ${r.status}`);
+    raw2.prepare('UPDATE ledgers SET is_archived = 0').run();
+    raw2.close();
   } else {
     check('（跳过只读成员矩阵：8099 实例库不可达）', true);
   }

@@ -166,7 +166,8 @@
     return h;
   }
 
-  function resultHtml(data) {    let h = '';
+  function resultHtml(data) {
+    let h = '';
     if (Array.isArray(data.items) && data.items.length) {
       h += '<div>';
       for (const it of data.items) {
