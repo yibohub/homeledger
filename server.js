@@ -109,6 +109,7 @@ app.use((req, res, next) => {
     css: APP_VERSION + '-' + assetStamp('css/app.css'),
     js: APP_VERSION + '-' + assetStamp('js/app.js'),
     assistant: APP_VERSION + '-' + assetStamp('js/assistant.js'),
+    m: APP_VERSION + '-' + assetStamp('js/m.js'),
   };
   res.locals.helpers = util;
   res.locals.charts = charts;
@@ -130,15 +131,29 @@ app.use((req, res, next) => {
 });
 
 /**
+ * 手机极简模式（P10 阶段 1）：触屏 UA 默认开、cookie hl_simple 显式覆盖（1=开 0=关），
+ * 桌面 UA 永不自动开启。激活后默认布局切 layout-m（三 Tab），页内显式传 layout 的不受影响。
+ */
+app.use((req, res, next) => {
+  const m = String(req.headers.cookie || '').match(/(?:^|;\s*)hl_simple=(\d)/);
+  const pref = m ? m[1] : null;
+  const phoneUA = /Mobi|iPhone/i.test(String(req.headers['user-agent'] || ''));
+  res.locals.minimal = pref === '1' || (pref === null && phoneUA);
+  res.locals.layoutName = res.locals.minimal ? 'layout-m' : 'layout';
+  next();
+});
+
+/**
  * 零依赖布局机制：视图先渲染成 body，再套进 layout.ejs
- * （传 { layout: false } 可关闭；传 { layout: 'layout-blank' } 换壳）
+ * （传 { layout: false } 可关闭；传 { layout: 'layout-blank' } 换壳；
+ *   不传则用极简模式中间件按请求选好的默认壳）
  */
 app.use((req, res, next) => {
   const rawRender = res.render.bind(res);
   res.render = function render(view, options, cb) {
     if (typeof options === 'function') { cb = options; options = {}; }
     const opts = options || {};
-    const layout = opts.layout === undefined ? 'layout' : opts.layout;
+    const layout = opts.layout === undefined ? (res.locals.layoutName || 'layout') : opts.layout;
     if (!layout) return rawRender(view, opts, cb);
     rawRender(view, opts, (err, html) => {
       if (err) return cb ? cb(err) : next(err);

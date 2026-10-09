@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="<%= (user && user.theme) || 'light' %>">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="csrf" content="<%= csrf %>">
+<meta name="theme-color" content="#3d6df5">
+<meta name="color-scheme" content="light dark">
+<title><%= title ? title + ' · ' + siteName : siteName %></title>
+<link rel="stylesheet" href="/static/css/app.css?v=<%= assetV.css %>">
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233d6df5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M19 5v14H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2Z'/><path d='M8 3v18'/><path d='M13 8h3'/><path d='M13 12h3'/></svg>">
+</head>
+<body class="m-body" data-layout="m">
+<%- include('partials/icons') %>
+<header class="m-head">
+  <div class="m-head-brand"><svg class="icon"><use href="#i-wallet"></use></svg><span><%= siteName %></span></div>
+  <% if (ledgers && ledgers.length) { %>
+  <form class="m-ledger-switch" method="post" action="/ledgers/switch">
+    <input type="hidden" name="_csrf" value="<%= csrf %>">
+    <input type="hidden" name="back" value="<%= path %>">
+    <select name="ledger_id" onchange="this.form.submit()" aria-label="切换账本">
+      <% ledgers.forEach(function(l){ %>
+      <option value="<%= l.id %>" <%= ledger && ledger.id === l.id ? 'selected' : '' %>><%= l.icon %> <%= l.name %></option>
+      <% }); %>
+    </select>
+  </form>
+  <% } %>
+  <a class="m-head-link" href="/theme/<%= (user && user.theme) === 'dark' ? 'light' : 'dark' %>" title="切换主题" aria-label="切换主题">
+    <% if ((user && user.theme) === 'dark') { %><svg class="icon sm"><use href="#i-sun"></use></svg><% } else { %><svg class="icon sm"><use href="#i-moon"></use></svg><% } %>
+  </a>
+  <a class="m-head-link" href="/notifications" title="通知" aria-label="通知中心">
+    <svg class="icon sm"><use href="#i-bell"></use></svg><% if (unreadCount) { %><span class="m-badge"><%= unreadCount %></span><% } %>
+  </a>
+</header>
+<main class="m-main">
+  <% if (flash) { %>
+    <div class="flash <%= flash.type %>"><span><%= flash.message %></span></div>
+  <% } %>
+<%- body %>
+</main>
+<nav class="m-tabbar" aria-label="主导航">
+  <a class="m-tab <%= activeNav === 'home' ? 'active' : '' %>" href="/"><svg class="icon"><use href="#i-house"></use></svg><span>记</span></a>
+  <a class="m-tab <%= activeNav === 'transactions' ? 'active' : '' %>" href="/transactions"><svg class="icon"><use href="#i-list"></use></svg><span>明细</span></a>
+  <a class="m-tab <%= activeNav === 'more' ? 'active' : '' %>" href="/more"><svg class="icon"><use href="#i-library"></use></svg><span>更多</span></a>
+</nav>
+<script src="/static/js/app.js?v=<%= assetV.js %>" defer></script>
+<script src="/static/js/m.js?v=<%= assetV.m %>" defer></script>
+</body>
+</html>

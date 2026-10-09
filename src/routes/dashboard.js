@@ -44,6 +44,18 @@ router.get('/', auth.requireLogin, (req, res, next) => {
 
   const recent = txn.listTransactions(ledgerId, { pageSize: 8, page: 1 }).rows;
   require('../lib/attachments').attachCounts(recent);
+
+  // 极简模式（P10 阶段 1）：Tab1「记」只要大数字、预算条、捕获区、最近 5 笔，
+  // 不算报表与台账那堆重查询（手机上白白多几十毫秒）
+  if (res.locals.minimal) {
+    return res.render('home-m', {
+      title: '记一笔', activeNav: 'home',
+      month, monthLabel: u.monthLabel(month),
+      cur, budgets, recent,
+      // 草稿缺账户时捕获区要能选账户（规则引擎草稿常无账户，不能让确认卡死）
+      mAccounts: fd.accounts(ledgerId).map((a) => ({ id: a.id, name: a.name, icon: a.icon })),
+    });
+  }
   const todayList = txn.listTransactions(ledgerId, { from: todayStr(), to: todayStr(), pageSize: 100 }).rows;
 
   const debts = all(
@@ -90,6 +102,21 @@ router.get('/', auth.requireLogin, (req, res, next) => {
 function monthOfToday() {
   return todayStr().slice(0, 7);
 }
+
+/* ------------------------- 极简模式（P10 阶段 1） ------------------------- */
+
+/** Tab3「更多」：领域分组收纳全部入口（结构稳定，不做按频率动态排序——布局漂移打断肌肉记忆） */
+router.get('/more', auth.requireLogin, (req, res) => {
+  if (!res.locals.ledger) return res.redirect('/');
+  res.render('more', { title: '更多', activeNav: 'more' });
+});
+
+/** 极简/完整模式切换：cookie 覆盖触屏 UA 自动判定，一年有效，任何设备可显式选择 */
+router.get('/ui-mode', auth.requireLogin, (req, res) => {
+  const simple = req.query.simple === '1' ? '1' : '0';
+  res.setHeader('Set-Cookie', `hl_simple=${simple}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly`);
+  res.redirect(simple === '1' ? '/' : '/transactions');
+});
 
 /* --------------------------------- 记账日历 -------------------------------- */
 

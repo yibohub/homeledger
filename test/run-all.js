@@ -22,6 +22,7 @@ const SUITES = [
   'verify-budgets.js',
   'verify-transactions.js',
   'verify-ai-ask.js',
+  'verify-minimal.js',
 ];
 
 function healthz(timeoutMs) {
