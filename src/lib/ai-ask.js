@@ -510,7 +510,8 @@ const NARRATE_SYSTEM_PROMPT = `你是家庭记账助手。根据给定的统计�
 1. 用 1~3 句话直接给结论，自然口语，不啰嗦。
 2. 只能使用统计结果里出现的数字和名称，禁止自己计算、估算或补充任何新数字。
 3. 金额字段是「分」，32450 表示 ¥324.50；输出统一写成 ¥xxx.xx，不要更换精度或自己换算错的数值。
-4. 直接输出回答文字，不要 JSON，不要 Markdown。`;
+4. 回答必须带上统计结果中的全部关键金额，省略任何关键数字都是不合格回答：对比类必须同时给出本期、上一期与增减额；汇总类给金额与笔数；预算类给预算、已用与剩余；趋势类逐月金额；排行类每个名次的金额；商户类给笔数与合计（有最近一笔也要给）。
+5. 直接输出回答文字，不要 JSON，不要 Markdown。`;
 
 async function narrateByModel(question, data, cfg) {
   const out = await ai.callModel(
@@ -523,6 +524,45 @@ async function narrateByModel(question, data, cfg) {
   const t = String(out || '').trim();
   if (!t) throw new Error('模型叙述为空');
   return t.slice(0, 500);
+}
+
+/* --------------------------- 叙述数字核验（防漏基数） --------------------------- */
+
+/** 该类统计回答必须出现的金额（分）；0 不要求（「上月无记录」这类可以没有数字） */
+function keyAmountsOf(data) {
+  const out = [];
+  switch (data.type) {
+    case 'category_summary': out.push(data.total); break;
+    case 'compare': out.push(data.cur_total, data.prev_total, Math.abs(data.delta)); break;
+    case 'trend': for (const r of data.series) out.push(r.total); break;
+    case 'top': for (const r of data.rows) out.push(r.total); break;
+    case 'budget': for (const r of data.rows) out.push(r.amount, r.used, Math.abs(r.remaining)); break;
+    case 'merchant': if (data.count) out.push(data.total); break;
+  }
+  return out.filter((c) => Number.isFinite(c) && c !== 0);
+}
+
+/** 归一化后比对：模型可能写 ¥3,460.50 / ¥3460.50 / 3460.50 元，逗号、符号、空格不作数 */
+const normNum = (s) => String(s).replace(/[,\s¥￥元]/g, '');
+
+/** 数字子串带边界匹配：「35.00」不能被「¥135.00」糊弄（前一位是数字即不算命中） */
+function coversNum(t, k) {
+  let i = t.indexOf(k);
+  while (i !== -1) {
+    const before = i > 0 ? t[i - 1] : '';
+    const after = i + k.length < t.length ? t[i + k.length] : '';
+    if (!/\d/.test(before) && !/\d/.test(after)) return true;
+    i = t.indexOf(k, i + 1);
+  }
+  return false;
+}
+
+/** 模型叙述是否覆盖全部关键金额；不覆盖就退回模板（确定性优先，与防臆造账户同一模式） */
+function narrationCovers(data, text) {
+  const keys = keyAmountsOf(data).map((c) => (c / 100).toFixed(2));
+  if (!keys.length) return true;
+  const t = normNum(text);
+  return keys.every((k) => coversNum(t, k));
 }
 
 function pctText(x) {
@@ -621,19 +661,22 @@ async function handleAssistantText({ text, ledgerId, today = todayStr() }) {
   const range = resolveRange(parsed.query.range, today);
   const data = runQuery(ledgerId, parsed.query, range, today);
   let answer = narrateTemplate(data);
+  const warnings = [];
   if (ai.isAiUsable()) {
     try {
-      answer = await narrateByModel(q, data, cfg);
-      usedModel = true;
+      const modelText = await narrateByModel(q, data, cfg);
+      // 叙述数字核验：模型漏掉关键金额（如对比句丢上月基数）就退回模板，确定性优先
+      if (narrationCovers(data, modelText)) answer = modelText;
+      else warnings.push('AI 叙述未覆盖全部关键数字，已用标准格式回答');
     } catch {
       // 叙述失败 → 保留模板文案
     }
   }
-  return { mode: 'answer', engine: usedModel ? 'llm' : 'rule', text: answer, data, warnings: [] };
+  return { mode: 'answer', engine: usedModel ? 'llm' : 'rule', text: answer, data, warnings };
 }
 
 module.exports = {
   looksLikeQuery, isExplicitRecord, buildQueryContext, matchQueryByRules, parseRangeByRules,
-  resolveRange, normalizeModelQuery, runQuery, narrateTemplate,
+  resolveRange, normalizeModelQuery, runQuery, narrateTemplate, narrationCovers, keyAmountsOf,
   handleAssistantText, QUERY_HINT_RE, CLARIFY_TEXT,
 };
