@@ -207,6 +207,12 @@ check('数值语义匹配（格式无关）：整元/少位小数/千分位/约�
 check('数值语义匹配：漏说关键数字仍被拒（核验的本职）',
   aiAsk.narrationCovers({ type: 'compare', cur_total: 45400, prev_total: 5000, delta: 40400 }, '这个月比上个月多花了不少。') === false
   && aiAsk.narrationCovers({ type: 'compare', cur_total: 45400, prev_total: 5000, delta: 40400 }, '本月 ¥454，上月 ¥50。') === false);
+check('空数据防编数（真实 Key 实测：无预算时模型编「还剩 ¥10000.00」）',
+  aiAsk.narrationCovers({ type: 'budget', rows: [] }, '餐饮预算还剩 ¥10000.00。') === false
+  && aiAsk.narrationCovers({ type: 'budget', rows: [] }, '还没有生效中的预算，可以到「预算」页创建。') === true
+  && aiAsk.narrationCovers({ type: 'category_summary', total: 0, count: 0 }, '本月还没有支出记录。') === true
+  && aiAsk.narrationCovers({ type: 'category_summary', total: 0, count: 0 }, '本月支出 ¥0.00，共 0 笔。') === true
+  && aiAsk.narrationCovers({ type: 'budget', rows: [] }, '本月（10月）还没有预算，上月也没有。') === true);
 
 /* 不变式防线：模板自身必须天然通过核验——否则未来改 narrateTemplate/money 格式时，
    有 Key 用户会静默退化成永远退回模板（无 Key 测试环境不会红，只有这条断言能拦住） */
@@ -214,6 +220,11 @@ const TPL_CASES = [
   cmpData,
   trendData,
   memberTop,
+  { type: 'budget', metric: 'expense', label: 'x', rows: [] },
+  { type: 'category_summary', metric: 'expense', label: 'x', category: null, total: 0, count: 0, whole_total: 0, share: 0, top_merchant: null },
+  { type: 'trend', metric: 'expense', category: null, label: 'x', series: [{ month: '2026-08', label: '8月', total: 0, count: 0 }, { month: '2026-09', label: '9月', total: 0, count: 0 }] },
+  { type: 'top', by: 'category', metric: 'expense', label: 'x', top_n: 3, rows: [] },
+  { type: 'merchant', metric: 'expense', keyword: '美团', label: 'x', confirm: false, total: 0, count: 0, latest: null },
   { type: 'category_summary', metric: 'expense', label: 'x', category: null, total: 346050, count: 4, whole_total: 346050, share: 1, top_merchant: { name: '美团', total: 123456, count: 2 } },
   { type: 'budget', metric: 'expense', label: 'x', rows: [{ name: '餐饮', amount: 10000, used: 3500, remaining: 6500, pct: 0.35 }, { name: '总预算', amount: 50000, used: 30000, remaining: 20000, pct: 0.6 }] },
   { type: 'budget', metric: 'expense', label: 'x', rows: [{ name: '超支的', amount: 5000, used: 8000, remaining: -3000, pct: 1.6 }] },
