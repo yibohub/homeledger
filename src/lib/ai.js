@@ -414,39 +414,39 @@ function buildHabitSummary(ledgerId) {
   const since = habitSince();
   const pathOf = (r) => (r.parent ? `${r.parent}/${r.cname}` : r.cname);
   const catRows = all(
-    `SELECT c.name AS cname, p.name AS parent, a.name AS aname, COUNT(*) AS c
+    `SELECT c.name AS cname, p.name AS parent, a.name AS aname, COUNT(*) AS cnt
      FROM transactions t
-     JOIN categories c ON c.id = t.category_id
+     JOIN categories c ON c.id = t.category_id AND c.is_archived = 0
      LEFT JOIN categories p ON p.id = c.parent_id
-     JOIN accounts a ON a.id = t.account_id
+     JOIN accounts a ON a.id = t.account_id AND a.is_archived = 0
      WHERE t.ledger_id = ? AND t.deleted_at IS NULL AND t.txn_date >= ?
        AND t.category_id IS NOT NULL AND t.account_id IS NOT NULL AND t.type IN ('expense','income')
      GROUP BY t.category_id, t.account_id
-     ORDER BY t.category_id, c DESC`,
+     ORDER BY t.category_id, cnt DESC`,
     ledgerId, since
   );
   const topAccountByCat = new Map();
   for (const r of catRows) if (!topAccountByCat.has(pathOf(r))) topAccountByCat.set(pathOf(r), r);
-  const catHints = [...topAccountByCat.values()].filter((r) => r.c >= 2)
-    .sort((x, y) => y.c - x.c).slice(0, 6)
+  const catHints = [...topAccountByCat.values()].filter((r) => r.cnt >= 2)
+    .sort((x, y) => y.cnt - x.cnt).slice(0, 6)
     .map((r) => `${pathOf(r)}→${r.aname}`);
 
   const merchRows = all(
-    `SELECT t.merchant, c.name AS cname, p.name AS parent, COUNT(*) AS c
+    `SELECT t.merchant, c.name AS cname, p.name AS parent, COUNT(*) AS cnt
      FROM transactions t
-     JOIN categories c ON c.id = t.category_id
+     JOIN categories c ON c.id = t.category_id AND c.is_archived = 0
      LEFT JOIN categories p ON p.id = c.parent_id
      WHERE t.ledger_id = ? AND t.deleted_at IS NULL AND t.txn_date >= ?
        AND t.merchant IS NOT NULL AND t.merchant != '' AND t.category_id IS NOT NULL
        AND t.type IN ('expense','income')
      GROUP BY t.merchant, t.category_id
-     ORDER BY t.merchant, c DESC`,
+     ORDER BY t.merchant, cnt DESC`,
     ledgerId, since
   );
   const topCatByMerch = new Map();
   for (const r of merchRows) if (!topCatByMerch.has(r.merchant)) topCatByMerch.set(r.merchant, r);
-  const merchHints = [...topCatByMerch.values()].filter((r) => r.c >= 2)
-    .sort((x, y) => y.c - x.c).slice(0, 5)
+  const merchHints = [...topCatByMerch.values()].filter((r) => r.cnt >= 2)
+    .sort((x, y) => y.cnt - x.cnt).slice(0, 5)
     .map((r) => `${r.merchant}→${pathOf(r)}`);
 
   const parts = [];
@@ -541,6 +541,7 @@ function textMentionsAccount(text, nameHint) {
   const s = String(text || '');
   const h = String(nameHint || '').replace(/\s/g, '');
   if (!s || !h) return false;
+  if (s.replace(/\s/g, '').includes(h)) return true; // 自定义命名的账户（名称不含任何关键词族）：账户名本身出现在原文即算有据
   for (const [re, family] of ACCOUNT_KEYWORDS) {
     if (h.includes(String(family).replace(/\s/g, '')) && re.test(s)) return true;
   }
@@ -565,14 +566,16 @@ function habitSince(today = todayStr()) {
  */
 function habitAccountId(ledgerId, { categoryId = null, merchant = null, type = 'expense' } = {}) {
   const since = habitSince();
+  // 排除已归档账户：归档后用户在确认页/账户页都看不到它，习惯若还往里记账就成了「隐形流水」
   const base = `FROM transactions
     WHERE ledger_id = ? AND deleted_at IS NULL AND account_id IS NOT NULL
+      AND account_id NOT IN (SELECT id FROM accounts WHERE ledger_id = ? AND is_archived = 1)
       AND type = ? AND txn_date >= ?`;
   if (categoryId) {
     const row = get(
       `SELECT account_id ${base} AND category_id = ?
        GROUP BY account_id ORDER BY COUNT(*) DESC, MAX(txn_date) DESC, MAX(id) DESC LIMIT 1`,
-      ledgerId, type, since, categoryId
+      ledgerId, ledgerId, type, since, categoryId
     );
     if (row) return Number(row.account_id);
   }
@@ -580,14 +583,14 @@ function habitAccountId(ledgerId, { categoryId = null, merchant = null, type = '
     const row = get(
       `SELECT account_id ${base} AND merchant = ?
        GROUP BY account_id ORDER BY COUNT(*) DESC, MAX(txn_date) DESC, MAX(id) DESC LIMIT 1`,
-      ledgerId, type, since, String(merchant).slice(0, 60)
+      ledgerId, ledgerId, type, since, String(merchant).slice(0, 60)
     );
     if (row) return Number(row.account_id);
   }
   const row = get(
     `SELECT account_id ${base}
      GROUP BY account_id ORDER BY COUNT(*) DESC, MAX(txn_date) DESC, MAX(id) DESC LIMIT 1`,
-    ledgerId, type, since
+    ledgerId, ledgerId, type, since
   );
   return row ? Number(row.account_id) : null;
 }
@@ -601,9 +604,10 @@ function habitCategoryId(ledgerId, merchant, type = 'expense') {
   const row = get(
     `SELECT category_id FROM transactions
      WHERE ledger_id = ? AND deleted_at IS NULL AND category_id IS NOT NULL
+       AND category_id NOT IN (SELECT id FROM categories WHERE is_archived = 1 AND (ledger_id = ? OR ledger_id IS NULL))
        AND merchant = ? AND type = ? AND txn_date >= ?
      GROUP BY category_id ORDER BY COUNT(*) DESC, MAX(txn_date) DESC, MAX(id) DESC LIMIT 1`,
-    ledgerId, String(merchant).slice(0, 60), type, habitSince()
+    ledgerId, ledgerId, String(merchant).slice(0, 60), type, habitSince()
   );
   return row ? Number(row.category_id) : null;
 }
@@ -629,11 +633,13 @@ function normalizeItem(raw, ledgerId, { sourceText = '' } = {}) {
     }
     if (!categoryId) categoryId = resolveCategoryId(ledgerId, kind === 'income' ? '其他收入' : '其他支出', kind);
   }
-  const acctHint = raw.acct || raw.account || raw.account_name;
+  let acctHint = raw.acct || raw.account || raw.account_name;
   let accountId = resolveAccountId(ledgerId, acctHint);
   if (accountId && sourceText && !textMentionsAccount(sourceText, acctHint)) {
-    // 模型臆造的账户：原文没有依据，丢弃后走习惯推荐（截图识别不受此约束——模型真的看到了账单）
+    // 模型臆造的账户：原文没有依据，丢弃后走习惯推荐（截图识别不受此约束——模型真的看到了账单）。
+    // 名字要一起丢：开放 API 的 account_name 兜底通道会按名字自动建账户，臆造名不能从后门复活
     accountId = null;
+    acctHint = null;
   }
   // 账户识别不出 → 习惯推荐补位（此时 categoryId 可能刚由习惯/关键词得出，正好作为推荐依据）
   const accountRec = !accountId ? habitAccountId(ledgerId, { categoryId, merchant, type }) : null;

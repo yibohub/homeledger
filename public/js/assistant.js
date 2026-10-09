@@ -63,11 +63,12 @@
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.ok) {
-        btn.textContent = `已撤销 ${data.undone} 笔` + (data.skipped ? `（${data.skipped} 笔超出时限跳过）` : '');
+        btn.textContent = `已撤销 ${data.undone} 笔` + (data.skipped ? `（${data.skipped} 笔无法撤销）` : '');
         btn.classList.add('done');
       } else {
-        btn.textContent = data.error || '撤销失败';
-        btn.classList.add('done');
+        // 服务端拒绝（超时/来源不符等）时恢复可点，让用户换ID或放弃由自己决定
+        btn.disabled = false;
+        btn.textContent = data.error || '撤销失败，点击重试';
       }
     } catch {
       btn.disabled = false;

@@ -185,6 +185,27 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   const still = db.get('SELECT deleted_at FROM transactions WHERE id = ?', staleId);
   check('超时交易未被改动', !!still && still.deleted_at === null);
 
+  /* --- G. 审查边界：自定义账户名核验 + 归档账户不参与推荐 --- */
+  const customId = db.run(
+    `INSERT INTO accounts (ledger_id, name, type, icon, currency, initial_cents, balance_cents, sort_order, created_at)
+     VALUES (?,?,?,?,?,0,0,90,?)`,
+    ledgerId, '浦发卡', 'debit', '🏦', 'CNY', db.nowStr()
+  ).lastInsertRowid;
+  const customRaw = { type: 'expense', amount: 40, txn_date: db.todayStr(), category_name: '餐饮/午餐', acct: '浦发卡', confidence: 1 };
+  const itG1 = aiLib.normalizeItem(customRaw, ledgerId, { sourceText: '午饭 40 浦发卡' });
+  check('自定义命名账户原文有据时不被丢弃', Number(itG1.account_id) === Number(customId) && itG1.account_recommended !== true,
+    `account_id=${itG1.account_id}`);
+  const itG2 = aiLib.normalizeItem(customRaw, ledgerId, { sourceText: '午饭 40' });
+  check('自定义账户名原文无据时交给习惯（微信钱包）', Number(itG2.account_id) === Number(wechat.id) && itG2.account_recommended === true,
+    `account_id=${itG2.account_id}`);
+  check('臆造账户名同步丢弃（不给开放 API 后门）', itG2.account_name === null, String(itG2.account_name));
+
+  db.run('UPDATE accounts SET is_archived = 1 WHERE id = ?', wechat.id);
+  const itG3 = aiLib.normalizeItem({ type: 'expense', amount: 40, txn_date: db.todayStr(), category_name: '餐饮/午餐', confidence: 1 }, ledgerId, { sourceText: '午饭 40' });
+  check('归档账户不参与习惯推荐', Number(itG3.account_id) !== Number(wechat.id) && Number(itG3.account_id) !== Number(customId),
+    `account_id=${itG3.account_id}`);
+  db.run('UPDATE accounts SET is_archived = 0 WHERE id = ?', wechat.id);
+
   console.log(`\n=== 结果：${pass} 通过 / ${fail} 失败 ===`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FATAL', e); process.exit(1); });

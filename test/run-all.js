@@ -45,8 +45,14 @@ function waitPortFree(timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
     (function probe() {
-      const req = http.get(`http://127.0.0.1:${PORT}/healthz`, (res) => {
+      // timeout 必须设：半死实例（accept 后不响应）没有默认超时，promise 永不 settle 会卡死整个跑批
+      const req = http.get({ host: '127.0.0.1', port: PORT, path: '/healthz', timeout: 2000 }, (res) => {
         res.resume();
+        if (Date.now() > deadline) return reject(new Error(`端口 ${PORT} 始终被旧实例占用`));
+        setTimeout(probe, 300);
+      });
+      req.on('timeout', () => {
+        req.destroy();
         if (Date.now() > deadline) return reject(new Error(`端口 ${PORT} 始终被旧实例占用`));
         setTimeout(probe, 300);
       });
@@ -67,6 +73,8 @@ function run(cmd, args, opts) {
 
 (async () => {
   const results = [];
+  // 上次跑批崩溃残留的实例同样会让第一个套件串数据，起跑前先确保端口空闲
+  await waitPortFree();
   for (const suite of SUITES) {
     const dataDir = path.join(ROOT, 'data-verify-runall');
     fs.rmSync(dataDir, { recursive: true, force: true });
