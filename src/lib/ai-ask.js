@@ -547,11 +547,12 @@ const normNum = (s) => String(s).replace(/[,\s¥￥元]/g, '');
 
 /** 从叙述里提取全部数字（转为分）。按数值比对而非字符串匹配：
  *  「¥454」= 454.00、「454.0」= 454.00——字符串匹配会把整元/少位小数的合格回答误杀
- *  （真实 Key 下频繁误触发回退的根因）；解析天然带边界，「1454」不会糊弄 454 */
+ *  （真实 Key 下频繁误触发回退的根因）；解析天然带边界，「1454」不会糊弄 454。
+ *  带「万」后缀按倍乘解析（「1.5万」= 1500 元） */
 function numbersIn(text) {
   const out = new Set();
-  for (const m of normNum(text).matchAll(/\d+(?:\.\d+)?/g)) {
-    const cents = Math.round(parseFloat(m[0]) * 100);
+  for (const m of normNum(text).matchAll(/(\d+(?:\.\d+)?)(万)?/g)) {
+    const cents = Math.round(parseFloat(m[1]) * (m[2] ? 10000 : 1) * 100);
     if (Number.isFinite(cents)) out.add(cents);
   }
   return out;
