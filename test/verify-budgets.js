@@ -240,7 +240,9 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
     sg && sg.enough === true && sg.months_covered === 3 && sg.avg6_cents === 2500 && sg.avg3_cents === 5000
     && sg.suggest_low_cents === 2600 && sg.suggest_high_cents === 2800, r.text.slice(0, 160));
   r = await req('GET', '/api/budgets/suggest?scope=category&category_id=999999999&trigger_type=expense');
-  check('非法分类 id 回落总预算口径（不 500）', r.status === 200 && r.json.ok === true, r.text.slice(0, 100));
+  check('非法分类 id 返回 400（不冒充总口径）', r.status === 400 && r.json && r.json.ok === false, `HTTP ${r.status}`);
+  r = await req('GET', '/api/budgets/suggest?scope=category&trigger_type=expense');
+  check('分类口径未选 id 不给建议（enough=false 而非总口径数字）', r.status === 200 && r.json.suggestion.enough === false && r.json.suggestion.months_covered === 0, r.text.slice(0, 100));
   const noAuth = await fetch(BASE + '/api/budgets/suggest?scope=overall', { headers: { Accept: 'application/json' }, redirect: 'manual' });
   check('未登录拒绝', noAuth.status !== 200, `HTTP ${noAuth.status}`);
 

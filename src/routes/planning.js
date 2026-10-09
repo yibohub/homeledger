@@ -18,17 +18,24 @@ router.get('/api/budgets/suggest', auth.requireLogin, (req, res) => {
   if (!ledger) return res.status(400).json({ ok: false, error: '没有账本' });
   const ledgerId = Number(ledger.id);
   const scope = ['overall', 'category', 'account'].includes(req.query.scope) ? req.query.scope : 'overall';
-  const categoryId = req.query.category_id ? Number(req.query.category_id) : null;
-  const validCat = categoryId && get('SELECT id FROM categories WHERE id = ? AND (ledger_id IS NULL OR ledger_id = ?)', categoryId, ledgerId);
-  const accountId = req.query.account_id ? Number(req.query.account_id) : null;
-  const validAcc = accountId && get('SELECT id FROM accounts WHERE id = ? AND ledger_id = ?', accountId, ledgerId);
+  const categoryId = validCategoryId(ledgerId, req.query.category_id);
+  const accountId = validAccountId(ledgerId, req.query.account_id);
+  // 分类/账户口径必须带有效 id：没选就不给建议（不冒充总口径），选了但非法（跨账本/垃圾值）直接 400
+  if (scope === 'category') {
+    if (!req.query.category_id) return res.json({ ok: true, suggestion: { enough: false, months_covered: 0 } });
+    if (!categoryId) return res.status(400).json({ ok: false, error: '分类不存在或已归档' });
+  }
+  if (scope === 'account') {
+    if (!req.query.account_id) return res.json({ ok: true, suggestion: { enough: false, months_covered: 0 } });
+    if (!accountId) return res.status(400).json({ ok: false, error: '账户不存在或已归档' });
+  }
   res.json({
     ok: true,
     suggestion: sch.budgetSuggestion({
       ledger_id: ledgerId,
-      scope: scope === 'category' && !validCat ? 'overall' : scope === 'account' && !validAcc ? 'overall' : scope,
-      category_id: validCat ? categoryId : null,
-      account_id: validAcc ? accountId : null,
+      scope,
+      category_id: categoryId,
+      account_id: accountId,
       trigger_type: req.query.trigger_type === 'income' ? 'income' : 'expense',
     }),
   });

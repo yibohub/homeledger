@@ -130,8 +130,8 @@
 
   /* --------------------------- 语音输入（P3） --------------------------- */
   /* Web Speech API（Chrome/Edge/Android Safari）：转写文本只回显到输入框可改，
-     不自动发送；录音不落盘不上传，出网的只有最终确认的文本（走既有识别管线）。
-     不支持的浏览器（如 iOS Safari）按钮保持隐藏，用系统键盘听写即可。 */
+     不自动发送。转写由浏览器自带语音服务完成（Chrome/Edge 下音频经厂商云端），
+     应用自身不落盘、不转发，也不经手音频。不支持的浏览器按钮保持隐藏。 */
   const micBtn = $('aiMic');
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (micBtn && SR) {
@@ -145,6 +145,8 @@
       rec.interimResults = true;
       rec.continuous = false;
       const base = textEl.value.trim();
+      // 录音中锁定输入框：onresult 是「起始快照 + 全量转写」覆盖式回填，录音中手输会被冲掉
+      textEl.readOnly = true;
       rec.onresult = (e) => {
         let s = '';
         for (let i = 0; i < e.results.length; i++) s += e.results[i][0].transcript;
@@ -153,11 +155,13 @@
       };
       rec.onend = () => {
         listening = false;
+        textEl.readOnly = false;
         micBtn.classList.remove('listening');
         micBtn.title = '语音输入';
         textEl.focus();
       };
       rec.onerror = (e) => {
+        textEl.readOnly = false; // 保险：个别实现 error 后不派发 end
         if (e.error !== 'no-speech' && e.error !== 'aborted') {
           addBubble('bot error', '语音识别失败（' + esc(e.error) + '），也可以直接打字');
         }

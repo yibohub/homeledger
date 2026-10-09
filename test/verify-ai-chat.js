@@ -68,7 +68,13 @@ const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
   check('assistant.js 可访问', r.status === 200 && r.text.includes('/api/ai/chat'), `HTTP ${r.status}`);
   check('语音输入（P3）：面板含麦克风按钮且默认隐藏（不支持浏览器不留死按钮）', layoutHtml.includes('id="aiMic"') && /id="aiMic"[^>]*hidden/.test(layoutHtml), '');
   check('语音输入（P3）：转写逻辑挂载 Web Speech + 中文', r.text.includes('SpeechRecognition') && r.text.includes('zh-CN'), '');
-  check('语音输入（P3）：转写只回显不自动发送', /textEl\.value\s*=/.test(r.text) && !/send\(\)[;,]?\s*\n?\s*rec\.start/.test(r.text), '');
+  check('语音输入（P3）：转写只回显不自动发送', (() => {
+    // 按源码区段截取语音段断言（整文件级的正则会被 send() 函数自身命中，拦不住真回归）
+    const segStart = r.text.indexOf('语音输入（P3）');
+    const segEnd = r.text.indexOf('/* ------------------------------ 气泡');
+    const seg = r.text.slice(Math.max(0, segStart), segEnd > segStart ? segEnd : undefined);
+    return segStart >= 0 && segEnd > segStart && !/send\s*\(/.test(seg) && /textEl\.value\s*=/.test(seg);
+  })(), '');
   r = await req('GET', '/static/css/app.css');
   check('助手样式已发布', r.status === 200 && r.text.includes('.ai-fab') && r.text.includes('.ai-bubble'));
   check('语音录音中样式已发布', r.text.includes('.ai-icon-btn.listening') || r.text.includes('aiMicPulse'), '');
