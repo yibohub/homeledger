@@ -218,6 +218,11 @@ function updateTransaction(id, ledgerId, userId, d) {
   const rate = Number(d.rate) > 0 ? Number(d.rate) : 1;
   const accountId = pickAccount(ledgerId, d.account_id);
   const toAccountId = pickAccount(ledgerId, d.to_account_id);
+  // 与 createTransaction 同规则：编辑把必填账户清空会让该笔在重算中凭空消失
+  if (['expense', 'income', 'lend', 'borrow', 'repay_pay', 'repay_receive', 'fee', 'interest'].includes(type) && !accountId) {
+    throw new Error('请选择账户');
+  }
+  if (type === 'adjust' && !accountId) throw new Error('余额调整需要指定账户');
   if (type === 'transfer' && (!accountId || !toAccountId)) throw new Error('转账需要选择转出与转入账户');
   if (type === 'transfer' && accountId === toAccountId) throw new Error('转出与转入账户不能相同');
   // 与 createTransaction 同规则：编辑改型成投资买卖时缺双账户/同账户会让资金凭空蒸发或净效果为 0

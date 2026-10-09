@@ -108,7 +108,13 @@ function invariant(label, ledgerId) {
 console.log('\n=== A1. txnEffects：14 类型余额方向（余额重算引擎的总开关）===\n');
 
 const eff = (t) => db.txnEffects({ account_id: 7, to_account_id: 9, amount_base_cents: 100, ...t });
-const effEq = (t, want) => JSON.stringify(eff(t)) === JSON.stringify(want);
+// 按 accountId→delta 比较语义，不锁定双条目类型的返回顺序（那是实现细节）
+const effEq = (t, want) => {
+  const got = eff(t);
+  if (got.length !== want.length) return false;
+  const byAcc = new Map(got.map((e) => [e.accountId, e.delta]));
+  return want.every((e) => byAcc.get(e.accountId) === e.delta);
+};
 
 check('expense：账户 -金额', effEq({ type: 'expense' }, [{ accountId: 7, delta: -100 }]), JSON.stringify(eff({ type: 'expense' })));
 check('lend：账户 -金额（钱出去了，但不算支出）', effEq({ type: 'lend' }, [{ accountId: 7, delta: -100 }]));
@@ -241,6 +247,8 @@ const beforeEdit = balOf(L3.acc.现金);
 expectThrow('编辑投资交易丢转入账户被拒（与创建同规则）', () => txn.updateTransaction(e6b, L3.ledgerId, uid, { type: 'invest_buy', amount_cents: 500, account_id: L3.acc.现金 }), '投资买入/卖出需要');
 expectThrow('编辑投资交易双方相同被拒', () => txn.updateTransaction(e6b, L3.ledgerId, uid, { type: 'invest_buy', amount_cents: 500, account_id: L3.acc.现金, to_account_id: L3.acc.现金 }), '不能相同');
 check('被拒的编辑不改动余额', balOf(L3.acc.现金) === beforeEdit, `现金=${balOf(L3.acc.现金)}`);
+expectThrow('编辑清空必填账户被拒（与创建同规则）', () => txn.updateTransaction(e6, L3.ledgerId, uid, { type: 'expense', amount_cents: 1000, account_id: null }), '请选择账户');
+expectThrow('编辑余额调整清空账户被拒', () => txn.updateTransaction(e6, L3.ledgerId, uid, { type: 'adjust', amount_cents: 100, account_id: null }), '余额调整需要指定账户');
 invariant('A6 编辑后', L3.ledgerId);
 
 /* ================================= A7. 报销 ================================= */
@@ -356,7 +364,7 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   let up = true;
   try { await fetch(BASE + '/login'); } catch { up = false; }
   if (!up) {
-    console.log('  SKIP  8099 未启动，跳过 HTTP 段。请先：PORT=8099 HOST=127.0.0.1 DATA_DIR=<repo>/data-verify node server.js');
+    console.log('  SKIP  8099 未启动，跳过 HTTP 段（8099 实例的库与进程内段 data-verify-txn 互不相干）。手工验证：PORT=8099 HOST=127.0.0.1 DATA_DIR=<repo>/data-verify node server.js');
     console.log(`\n结果：${pass} 通过 / ${fail} 失败（未含 HTTP 段）\n`);
     process.exit(fail ? 1 : 0);
   }
