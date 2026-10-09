@@ -20,6 +20,7 @@ const SUITES = [
   'verify-model-list.js',
   'verify-subscriptions.js',
   'verify-budgets.js',
+  'verify-transactions.js',
 ];
 
 function healthz(timeoutMs) {
