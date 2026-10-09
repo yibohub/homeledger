@@ -183,6 +183,11 @@ check('金额为 0 不作硬性要求（「上月无记录」可无数字）',
 check('对比类上期为 0 仍须口头交代基数（真实 Key 验证抓到的漏网案例）',
   aiAsk.narrationCovers({ type: 'compare', cur_total: 45400, prev_total: 0, delta: 45400 }, '这个月比上个月多花了¥454.00元。') === false
   && aiAsk.narrationCovers({ type: 'compare', cur_total: 45400, prev_total: 0, delta: 45400 }, '本月 ¥454.00，上月 ¥0.00，多 ¥454.00。') === true);
+check('零交代正则：裸「无」插入语不放行、全角￥与带空格 0 元认',
+  aiAsk.narrationCovers({ type: 'compare', cur_total: 45400, prev_total: 0, delta: 45400 }, '本月 ¥454.00，与上月相比无变化。') === false
+  && aiAsk.narrationCovers({ type: 'compare', cur_total: 45400, prev_total: 0, delta: 45400 }, '本月 ¥454.00，上月￥0.00，多了 ¥454.00。') === true
+  && aiAsk.narrationCovers({ type: 'compare', cur_total: 45400, prev_total: 0, delta: 45400 }, '本月 ¥454.00，上月为 0 元，多了 ¥454.00。') === true
+  && aiAsk.narrationCovers({ type: 'compare', cur_total: 45400, prev_total: 0, delta: 45400 }, '买了 30 元的东西，多花了¥454.00。') === false);
 check('trend 序列逐月金额都要出现',
   aiAsk.narrationCovers(trendData, '8月 ¥45.00、9月 ¥50.00、10月 ¥35.00。') === true
   && aiAsk.narrationCovers(trendData, '8月 ¥45.00、9月 ¥50.00。') === false);
