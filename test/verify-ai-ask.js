@@ -169,6 +169,22 @@ const memberTop = aiAsk.runQuery(ledgerId, { type: 'top', metric: 'expense', by:
 check('成员榜：金额 35 元且笔数只计收支（转账不算）', memberTop.rows.length === 1 && memberTop.rows[0].total === 3500 && memberTop.rows[0].count === 1,
   JSON.stringify(memberTop.rows));
 
+console.log('\n=== A6. 叙述数字核验（模型漏关键金额 → 退回模板）===\n');
+
+// cmpData：cur 3500 / prev 5000 / delta -1500（分）
+check('完整对比叙述（含两期与增减）通过核验', aiAsk.narrationCovers(cmpData, '本月支出 ¥35.00，上月 ¥50.00，少 ¥15.00。') === true);
+check('只说结论丢上期基数 → 不通过（触发模板回退）', aiAsk.narrationCovers(cmpData, '这个月比上个月少花了 ¥15.00。') === false);
+check('漏增减额 → 不通过', aiAsk.narrationCovers(cmpData, '本月 ¥35.00，上月 ¥50.00。') === false);
+check('千分位/单位差异不影响核验（¥3,460.50 = ¥3460.50 = 3460.50元）',
+  aiAsk.narrationCovers({ type: 'category_summary', total: 346050 }, '共花了 ¥3,460.50。') === true
+  && aiAsk.narrationCovers({ type: 'category_summary', total: 346050 }, '共花了 3460.50元。') === true);
+check('金额为 0 不作硬性要求（「上月无记录」可无数字）',
+  aiAsk.narrationCovers({ type: 'compare', cur_total: 45400, prev_total: 0, delta: 45400 }, '这个月花了 ¥454.00，上个月没有记录。') === true);
+check('trend 序列逐月金额都要出现',
+  aiAsk.narrationCovers(trendData, '8月 ¥45.00、9月 ¥50.00、10月 ¥35.00。') === true
+  && aiAsk.narrationCovers(trendData, '8月 ¥45.00、9月 ¥50.00。') === false);
+check('budget 行要求已用与剩余', aiAsk.narrationCovers({ type: 'budget', rows: [{ used: 3500, remaining: 6500 }] }, '预算已用 ¥35.00，还剩 ¥65.00') === true);
+
 console.log('\n--- 进程内段完成，进入 HTTP 段 ---\n');
 if (fail) { console.log(`\n结果：${pass} 通过 / ${fail} 失败（进程内段未全过，跳过 HTTP 段）\n`); process.exit(1); }
 
