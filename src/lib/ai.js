@@ -817,6 +817,6 @@ module.exports = {
   classifyByKeywords, guessAccountName, parseDateWords, parseTextByRules,
   resolveCategoryId, resolveAccountId, normalizeItem, buildContext,
   habitAccountId, habitCategoryId, buildHabitSummary, buildUserPrompt,
-  extractAmount, cleanMerchant, callModel, listModels, guessVision,
+  extractAmount, cleanMerchant, callModel, listModels, guessVision, extractJson,
   isHeaderSafe, isMaskedSecret, sanitizeSecret,
 };

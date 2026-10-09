@@ -4,6 +4,7 @@ const express = require('express');
 const { all, get, run, todayStr, nowStr } = require('../db');
 const auth = require('../lib/auth');
 const ai = require('../lib/ai');
+const aiAsk = require('../lib/ai-ask');
 const txn = require('../lib/txn');
 const fd = require('../lib/formdata');
 const att = require('../lib/attachments');
@@ -142,16 +143,42 @@ router.post('/api/ai/text', auth.requireLogin, auth.requireLedgerWrite, async (r
 /* ------------------------------ AI 小助手对话 ------------------------------ */
 
 /**
- * 站内 AI 助手：文字或截图 → 识别 → 直接入库（source=ai_chat）。
+ * 站内 AI 助手：文字或截图 → 先判意图再分发。
+ *  - 纯文本且带查询信号（「多少」「预算」「比上月」…）→ 对话查账（P2，lib/ai-ask），只读成员可用
+ *  - 其余（含一切截图）→ 识别后直接入库（source=ai_chat），需可写权限
  * 与 /api/ai/scan 的区别：一步到位自动记账，面向全局浮动助手的轻量调用。
  */
-router.post('/api/ai/chat', auth.requireLogin, auth.requireLedgerWrite, async (req, res) => {
-  const ledgerId = Number(res.locals.ledger.id);
+router.post('/api/ai/chat', auth.requireLogin, async (req, res) => {
+  const ledger = res.locals.ledger;
+  if (!ledger) return res.status(400).json({ ok: false, error: '没有账本，请先创建一个账本' });
+  const ledgerId = Number(ledger.id);
   try {
     const images = Array.isArray(req.body.images) ? req.body.images.slice(0, 6) : [];
     const text = String(req.body.text || '').slice(0, 4000).trim();
     if (!images.length && !text) {
-      return res.status(400).json({ ok: false, code: 'empty', error: '说一句消费（如「午饭 35 元」）或发一张账单截图' });
+      return res.status(400).json({ ok: false, code: 'empty', error: '说一句消费（如「午饭 35 元」）、问一句账（如「这个月餐饮花了多少」）或发一张账单截图' });
+    }
+
+    /* ---- 查询分支：不写库，只读成员可用；返回 null 表示不是查询 ---- */
+    if (!images.length && text) {
+      try {
+        const answer = await aiAsk.handleAssistantText({ text, ledgerId });
+        if (answer) {
+          auth.audit(req, 'ai.ask', { ledgerId, detail: `${answer.engine} ${answer.mode}：${text.slice(0, 50)}` });
+          return res.json({ ok: true, mode: answer.mode, engine: answer.engine, text: answer.text, data: answer.data, warnings: answer.warnings });
+        }
+      } catch (e) {
+        // 查询管线故障不挡记账：落回下方记账管线（识别不出会走既有的友好返回）
+        console.error('[ai-ask] 查询管线异常，回退记账分支：', e.message);
+      }
+    }
+
+    /* ---- 记账分支：需要可写权限（归档账本只读，与旧 requireLedgerWrite 语义一致） ---- */
+    if (ledger.is_archived) {
+      return res.status(403).json({ ok: false, error: '该账本已归档（只读），请先在「账本管理」中恢复后再记账' });
+    }
+    if (!auth.canWrite(ledger.role)) {
+      return res.status(403).json({ ok: false, error: '你在该账本中只有只读权限，不能记账，但可以直接提问查账（如「这个月餐饮花了多少」）' });
     }
 
     const saved = [];
@@ -211,6 +238,7 @@ router.post('/api/ai/chat', auth.requireLogin, auth.requireLedgerWrite, async (r
 
     res.json({
       ok: items.length === 0 || errors.length < items.length,
+      mode: 'record',
       engine: result.engine,
       model: result.model || null,
       items,

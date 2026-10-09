@@ -24,7 +24,7 @@ ZCode 及其他编码代理在本仓库的工作指引（自动加载）。本�
 ```bash
 npm start                            # 起服务 :5111（数据 ./data；plain node 无 --watch，改码需重启）
 npm run dev                          # --watch 模式
-node test/run-all.js                 # 全量回归：10 套件，各自起独立实例 :8099（跑前确保 8099 无残留）
+node test/run-all.js                 # 全量回归：11 套件，各自起独立实例 :8099（跑前确保 8099 无残留）
 node test/selfcheck-static.js        # 静态自检
 DATA_DIR=./data-demo node scripts/seed-demo.js   # 演示数据（独立目录，不碰真实数据）
 ```

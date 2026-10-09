@@ -155,6 +155,17 @@
     return '¥' + (Number(c || 0) / 100).toFixed(2);
   }
 
+  /* 查账回答（P2 对话查账）：mode=answer 直出统计结论，mode=clarify 反问引导 */
+  function answerHtml(data) {
+    let h = '<div class="ai-answer">' + esc(data.text || '').replace(/\n/g, '<br>') + '</div>';
+    const tag = data.engine === 'llm' ? 'AI 统计' : '规则统计';
+    h += `<div class="ai-meta"><span>${esc(tag)}</span><span>·</span><a href="/reports">看报表 →</a></div>`;
+    if (data.warnings && data.warnings.length) {
+      h += `<div class="ai-warn">⚠ ${esc(data.warnings.join('；'))}</div>`;
+    }
+    return h;
+  }
+
   function resultHtml(data) {
     let h = '';
     if (Array.isArray(data.items) && data.items.length) {
@@ -221,6 +232,8 @@
         const msg = data.error || (data.errors && data.errors.join('；')) || '识别失败，请稍后重试';
         const isCfg = data.code === 'not_configured' || /尚未配置|未配置/.test(msg);
         addBubble('bot error', esc(msg) + (isCfg ? ' <a href="/settings">去配置 →</a>' : ''));
+      } else if (data.mode === 'answer' || data.mode === 'clarify') {
+        addBubble('bot', answerHtml(data));
       } else if (!data.items || !data.items.length) {
         addBubble('bot', '没有识别到可记账的内容 🤔 试试像这样描述：<em>午饭 35 元</em>、<em>昨天加油 300</em>，或发一张账单截图。');
       } else {
