@@ -63,7 +63,8 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   r = await req('GET', '/', { ua: PHONE_UA });
   check('手机 UA：自动极简（layout-m + 三 Tab）', r.status === 200 && r.text.includes('data-layout="m"') && r.text.includes('m-tabbar')
     && r.text.includes('href="/transactions"') && r.text.includes('href="/more"'), `HTTP ${r.status}`);
-  check('极简首页含捕获区三入口', r.text.includes('id="mText"') && r.text.includes('id="mMic"') && r.text.includes('id="mCam"') && r.text.includes('id="mGo"'));
+  check('极简首页含捕获区三入口（输入框独占一行 + 按钮行带文字标签）', r.text.includes('id="mText"') && r.text.includes('id="mMic"') && r.text.includes('id="mCam"') && r.text.includes('id="mGo"')
+    && r.text.includes('m-capture-actions') && r.text.includes('>语音</span>') && r.text.includes('>识别</span>'));
   check('极简首页含本月大数字与最近 5 笔区', r.text.includes('m-hero') && r.text.includes('最近 5 笔'));
   check('极简模式隐藏悬浮球（捕获区即全屏形态）', !r.text.includes('id="aiFab"') && !r.text.includes('id="aiPanel"'));
 
