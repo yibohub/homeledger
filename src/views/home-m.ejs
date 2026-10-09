@@ -31,15 +31,17 @@
     <% } %>
   </section>
 
-  <% if (canWrite(ledger.role)) { %>
-  <!-- AI 捕获区：悬浮球的全屏形态（语音 / 拍账单 / 文字），先草稿后确认 -->
+  <!-- AI 捕获区：悬浮球的全屏形态（语音 / 拍账单 / 文字），先草稿后确认；
+       问句自动转查账（P10 阶段 2），只读成员也可问（拍单按钮按可写权限显示） -->
   <section class="m-card m-capture" id="mCapture">
     <div class="m-capture-input">
-      <textarea id="mText" rows="1" placeholder="说一句或输入：午饭 35 元" inputmode="text"></textarea>
+      <textarea id="mText" rows="1" placeholder="<%= canWrite(ledger.role) ? '记一句「午饭 35 元」，或问「这个月花了多少」' : '问一句账：这个月餐饮花了多少' %>" inputmode="text"></textarea>
       <div class="m-capture-actions">
         <button id="mMic" class="m-capture-btn" type="button" title="语音输入" aria-label="语音输入" hidden><svg class="icon"><use href="#i-mic"></use></svg><span>语音</span></button>
+        <% if (canWrite(ledger.role)) { %>
         <button id="mCam" class="m-capture-btn" type="button" title="拍账单" aria-label="拍账单"><svg class="icon"><use href="#i-camera"></use></svg><span>拍单</span></button>
-        <button id="mGo" class="m-capture-btn primary" type="button" title="识别" aria-label="识别"><svg class="icon"><use href="#i-sparkles"></use></svg><span>识别</span></button>
+        <% } %>
+        <button id="mGo" class="m-capture-btn primary" type="button" title="<%= canWrite(ledger.role) ? '识别' : '提问' %>" aria-label="<%= canWrite(ledger.role) ? '识别' : '提问' %>"><svg class="icon"><use href="#i-sparkles"></use></svg><span><%= canWrite(ledger.role) ? '识别' : '提问' %></span></button>
         <input id="mFile" type="file" accept="image/*" multiple hidden>
       </div>
     </div>
@@ -47,7 +49,6 @@
     <div id="mDrafts"></div>
     <div id="mMsg" class="m-capture-msg hidden"></div>
   </section>
-  <% } %>
 
   <!-- 最近 5 笔 -->
   <section class="m-card">
@@ -56,7 +57,7 @@
       <a class="tiny" href="/transactions">全部 →</a>
     </div>
     <% if (!recent || !recent.length) { %>
-    <div class="m-empty">还没有记录，说一句「午饭 35 元」试试</div>
+    <div class="m-empty"><%= canWrite(ledger.role) ? '还没有记录，说一句「午饭 35 元」试试' : '还没有记录' %></div>
     <% } else { %>
     <div class="m-recent">
       <% recent.slice(0, 5).forEach(function(t){ %>
