@@ -1,7 +1,7 @@
 'use strict';
 /** AI 记账：截图识别、文本识别、草稿确认入库 */
 const express = require('express');
-const { all, get, run, todayStr } = require('../db');
+const { all, get, run, todayStr, nowStr } = require('../db');
 const auth = require('../lib/auth');
 const ai = require('../lib/ai');
 const txn = require('../lib/txn');
@@ -223,6 +223,39 @@ router.post('/api/ai/chat', auth.requireLogin, auth.requireLedgerWrite, async (r
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
   }
+});
+
+/* ------------------------------ AI 入账撤销 ------------------------------ */
+
+/**
+ * 后悔药：悬浮球「发出去就记好」是自动入库，识别错了需要一键撤回。
+ * 只允许撤销本人在本账本、最近 30 分钟内、由 AI/开放 API 自动入账的记录，防止误删陈旧数据。
+ */
+const AI_UNDO_WINDOW_MS = 30 * 60 * 1000;
+const AI_SOURCES = ['ai_chat', 'ai_screenshot', 'api_open_ai'];
+
+router.post('/api/ai/undo', auth.requireLogin, auth.requireLedgerWrite, (req, res) => {
+  const ledgerId = Number(res.locals.ledger.id);
+  const ids = [...new Set((Array.isArray(req.body.ids) ? req.body.ids : []).map(Number).filter(Boolean))];
+  if (!ids.length) return res.status(400).json({ ok: false, error: '缺少要撤销的交易 ID' });
+
+  const cutoff = nowStr(new Date(Date.now() - AI_UNDO_WINDOW_MS));
+  const deletable = [];
+  for (const id of ids) {
+    const t = get(
+      `SELECT id FROM transactions
+       WHERE id = ? AND ledger_id = ? AND user_id = ? AND source IN (${AI_SOURCES.map(() => '?').join(',')})
+         AND deleted_at IS NULL AND created_at >= ?`,
+      id, ledgerId, req.session.userId, ...AI_SOURCES, cutoff
+    );
+    if (t) deletable.push(id);
+  }
+  if (!deletable.length) {
+    return res.status(400).json({ ok: false, error: '没有可撤销的记录（仅支持撤销刚通过 AI 自动入账的交易）' });
+  }
+  const undone = txn.bulkDelete(deletable, ledgerId);
+  auth.audit(req, 'ai.undo', { ledgerId, detail: `撤销 AI 入账 ${undone} 笔（id: ${deletable.join(',')}）` });
+  res.json({ ok: true, undone, skipped: ids.length - deletable.length });
 });
 
 /* -------------------------------- 附件操作 -------------------------------- */

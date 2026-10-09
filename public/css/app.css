@@ -819,6 +819,10 @@ a.chip:hover { border-color: var(--primary); color: var(--primary); background: 
 .ai-record .amt.expense { color: var(--expense); }
 .ai-warn { font-size: 11px; color: var(--warn); margin-top: 7px; line-height: 1.5; }
 .ai-meta { font-size: 10.5px; color: var(--muted); margin-top: 7px; display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.ai-undo { border: 1px solid var(--border-strong); background: transparent; color: var(--muted); border-radius: 8px; padding: 2px 10px; font-size: 11px; cursor: pointer; transition: color .15s ease-in-out, border-color .15s ease-in-out; }
+.ai-undo:hover { color: #f5222d; border-color: #f5222d; }
+.ai-undo.done { pointer-events: none; color: var(--muted); border-color: var(--border); }
+.ai-hint { font-size: 10px; color: var(--muted); font-weight: 400; }
 
 .ai-typing { display: inline-flex; gap: 4px; padding: 3px 2px; }
 .ai-typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: aiBlink 1.2s infinite; }

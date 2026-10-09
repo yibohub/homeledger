@@ -16,6 +16,7 @@ const SUITES = [
   'verify-ai-chat.js',
   'verify-ai-image.js',
   'verify-ai-attachments.js',
+  'verify-ai-habit.js',
   'verify-model-list.js',
   'verify-subscriptions.js',
   'verify-budgets.js',
@@ -34,6 +35,22 @@ function healthz(timeoutMs) {
         if (Date.now() > deadline) return reject(new Error('healthz 超时'));
         setTimeout(probe, 300);
       }
+    })();
+  });
+}
+
+/** 等待端口真正空闲：旧实例的 SIGTERM 优雅关闭最多可耗时 3 秒，固定 sleep 会撞上 EADDRINUSE，
+ *  新实例起不来时 healthz 会探到旧实例，套件就对着上一套件的数据跑了（表现为失败在套件间漂移）。 */
+function waitPortFree(timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve, reject) => {
+    (function probe() {
+      const req = http.get(`http://127.0.0.1:${PORT}/healthz`, (res) => {
+        res.resume();
+        if (Date.now() > deadline) return reject(new Error(`端口 ${PORT} 始终被旧实例占用`));
+        setTimeout(probe, 300);
+      });
+      req.on('error', () => resolve());
     })();
   });
 }
@@ -68,7 +85,7 @@ function run(cmd, args, opts) {
       results.push({ suite, ok: false, pass: null, fail: null, tail: 'SERVER_FAIL ' + e.message });
     } finally {
       server.kill();
-      await new Promise((r) => setTimeout(r, 500));
+      await waitPortFree();
       fs.rmSync(dataDir, { recursive: true, force: true });
     }
   }

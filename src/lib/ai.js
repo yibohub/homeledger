@@ -6,7 +6,7 @@
  * 输出统一为「账单草稿」结构，交给用户确认后再落库。
  */
 const { all, get, getSetting, setSetting, todayStr } = require('../db');
-const { parseAmountToCents, uid } = require('./util');
+const { parseAmountToCents, uid, pad } = require('./util');
 
 /* -------------------------------- 配置读取 -------------------------------- */
 
@@ -479,6 +479,67 @@ function resolveAccountId(ledgerId, nameHint) {
   return null;
 }
 
+/* ------------------------- 习惯记忆（本地统计推荐） ------------------------- */
+
+/** 习惯统计的时间窗：只看最近 90 天，「最近的习惯」才代表现在 */
+const HABIT_WINDOW_DAYS = 90;
+
+function habitSince(today = todayStr()) {
+  const d = new Date(`${today}T00:00:00`);
+  d.setDate(d.getDate() - HABIT_WINDOW_DAYS);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * 习惯推荐账户：识别结果没带付款方式时，用本账本自己的历史推断这笔最可能用哪个账户。
+ * 推荐链：同分类最常用 → 同商户最常用 → 同类型全局最常用。
+ * 纯本地 GROUP BY 统计，零 token，未配置 AI Key 的规则引擎路径同样生效。
+ */
+function habitAccountId(ledgerId, { categoryId = null, merchant = null, type = 'expense' } = {}) {
+  const since = habitSince();
+  const base = `FROM transactions
+    WHERE ledger_id = ? AND deleted_at IS NULL AND account_id IS NOT NULL
+      AND type = ? AND txn_date >= ?`;
+  if (categoryId) {
+    const row = get(
+      `SELECT account_id ${base} AND category_id = ?
+       GROUP BY account_id ORDER BY COUNT(*) DESC, MAX(txn_date) DESC, MAX(id) DESC LIMIT 1`,
+      ledgerId, type, since, categoryId
+    );
+    if (row) return Number(row.account_id);
+  }
+  if (merchant) {
+    const row = get(
+      `SELECT account_id ${base} AND merchant = ?
+       GROUP BY account_id ORDER BY COUNT(*) DESC, MAX(txn_date) DESC, MAX(id) DESC LIMIT 1`,
+      ledgerId, type, since, String(merchant).slice(0, 60)
+    );
+    if (row) return Number(row.account_id);
+  }
+  const row = get(
+    `SELECT account_id ${base}
+     GROUP BY account_id ORDER BY COUNT(*) DESC, MAX(txn_date) DESC, MAX(id) DESC LIMIT 1`,
+    ledgerId, type, since
+  );
+  return row ? Number(row.account_id) : null;
+}
+
+/**
+ * 习惯推荐分类：同商户近 90 天最常用分类（商户名精确匹配）。
+ * 只在分类名匹配与关键词表都猜不中时兜底，让「肯德基 → 餐饮/外卖」这类映射以用户自己的记法为准。
+ */
+function habitCategoryId(ledgerId, merchant, type = 'expense') {
+  if (!merchant) return null;
+  const row = get(
+    `SELECT category_id FROM transactions
+     WHERE ledger_id = ? AND deleted_at IS NULL AND category_id IS NOT NULL
+       AND merchant = ? AND type = ? AND txn_date >= ?
+     GROUP BY category_id ORDER BY COUNT(*) DESC, MAX(txn_date) DESC, MAX(id) DESC LIMIT 1`,
+    ledgerId, String(merchant).slice(0, 60), type, habitSince()
+  );
+  return row ? Number(row.category_id) : null;
+}
+
 /** 规范化单条草稿 */
 function normalizeItem(raw, ledgerId) {
   const type = ['expense', 'income', 'transfer'].includes(raw.type) ? raw.type : 'expense';
@@ -486,25 +547,37 @@ function normalizeItem(raw, ledgerId) {
   const amountCents = Number.isFinite(Number(raw.amount_cents))
     ? Number(raw.amount_cents)
     : parseAmountToCents(raw.amount);
+  const merchant = raw.merchant ? String(raw.merchant).trim().slice(0, 60) : null;
   const catName = raw.category_name || raw.category || null;
   let categoryId = resolveCategoryId(ledgerId, catName, kind);
+  let categoryRecommended = false;
   if (!categoryId && type !== 'transfer') {
     const kw = classifyByKeywords(`${raw.merchant || ''} ${raw.note || ''} ${catName || ''}`);
     if (kw) categoryId = resolveCategoryId(ledgerId, kw.category, kw.kind === 'income' ? 'income' : kind);
+    if (!categoryId) {
+      // 关键词表兜底失败 → 用户自己的商户历史优先于「其他」
+      categoryId = habitCategoryId(ledgerId, merchant, kind);
+      if (categoryId) categoryRecommended = true;
+    }
     if (!categoryId) categoryId = resolveCategoryId(ledgerId, kind === 'income' ? '其他收入' : '其他支出', kind);
   }
+  const accountId = resolveAccountId(ledgerId, raw.acct || raw.account || raw.account_name);
+  // 账户识别不出 → 习惯推荐补位（此时 categoryId 可能刚由习惯/关键词得出，正好作为推荐依据）
+  const accountRec = !accountId ? habitAccountId(ledgerId, { categoryId, merchant, type }) : null;
   return {
     draft_id: uid(10),
     type,
     amount_cents: Math.abs(amountCents || 0),
     currency: raw.currency || 'CNY',
     txn_date: /^\d{4}-\d{2}-\d{2}$/.test(String(raw.txn_date || '')) ? raw.txn_date : todayStr(),
-    merchant: raw.merchant ? String(raw.merchant).slice(0, 60) : null,
+    merchant,
     note: raw.note ? String(raw.note).slice(0, 200) : null,
     category_id: categoryId,
     category_name: catName,
-    account_id: resolveAccountId(ledgerId, raw.acct || raw.account || raw.account_name),
+    category_recommended: categoryRecommended,
+    account_id: accountId || accountRec,
     account_name: raw.acct || raw.account || raw.account_name || null,
+    account_recommended: !accountId && !!accountRec,
     confidence: Number.isFinite(Number(raw.confidence)) ? Number(raw.confidence) : 0.8,
     raw,
   };
@@ -664,6 +737,7 @@ module.exports = {
   getAiConfig, isAiReady, isAiUsable, isLocalUrl, analyzeBill, testConnection,
   classifyByKeywords, guessAccountName, parseDateWords, parseTextByRules,
   resolveCategoryId, resolveAccountId, normalizeItem, buildContext,
+  habitAccountId, habitCategoryId,
   extractAmount, cleanMerchant, callModel, listModels, guessVision,
   isHeaderSafe, isMaskedSecret, sanitizeSecret,
 };
