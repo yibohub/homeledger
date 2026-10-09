@@ -19,7 +19,7 @@
 ## 🎯 进行中
 
 ### v1.11.0 发版（批次已完成合并，tag 待维护者确认）
-- [x] 批次内容：P10 阶段 2 问账嵌入 Tab1 + **P5 订阅模式挖掘** + 叙述核验数值匹配修误杀 + 空数据防编数 + 语音 not-allowed 修复 + 捕获区两行布局（详见「已完成」与 [versions.md](versions.md)）；**12 套件 570 断言全绿**，版本三件套已同步
+- [x] 批次内容：P10 阶段 2 问账嵌入 Tab1 + **P5 订阅模式挖掘** + 叙述核验数值匹配修误杀 + 空数据防编数 + 语音 not-allowed 修复 + 捕获区两行布局（详见「已完成」与 [versions.md](versions.md)）；**12 套件 573 断言全绿**，版本三件套已同步
 - [ ] 推 `v1.11.0` 标签（维护者确认后）→ CI 双架构 → GHCR `1.11.0` / `latest`
 - [ ] **NAS 部署（维护者操作；当前跑 v1.10.0）**：`cd /volume1/docker/homeledger && docker compose pull && docker compose up -d`（升级前建议先备份数据库；镜像走 ghcr.milu.moe 中转，详见 [solutions/deploy-nas.md](solutions/deploy-nas.md)）
 - [ ] NAS 计划任务：每日自动备份 `/volume1/docker/homeledger/data` 到另一共享文件夹
@@ -89,7 +89,7 @@
 
 | 时间 | 提交 / PR | 内容 |
 |---|---|---|
-| 2026-10-10 | 本批 PR | **P5 订阅模式挖掘**（lib/sub-mining.js 纯统计：商户聚合 + 金额 ±10% + 间隔 ±3 天 + ≥3 期；订阅页候选卡一键登记复用既有建订阅表单、默认仅提醒防重复入账；「不是订阅」settings 持久忽略；recurring_rules/已登记去重；dismiss 路由置于 /:id 前防遮蔽）；verify-subscriptions 104→129，全量 12 套件 570 断言全绿 |
+| 2026-10-10 | 本批 PR | **P5 订阅模式挖掘**（lib/sub-mining.js 纯统计：商户聚合 + 金额 ±10% + 间隔 ±3 天 + ≥3 期；订阅页候选卡一键登记复用既有建订阅表单、默认仅提醒防重复入账；「不是订阅」settings 持久忽略；recurring_rules/已登记去重；dismiss 路由置于 /:id 前防遮蔽）；verify-subscriptions 104→132，全量 12 套件 573 断言全绿 |
 | 2026-10-09 | 本批 PR | **v1.11.0 待发版批次**：P10 阶段 2 问账嵌入 Tab1（捕获区一框两用，只读可问）+ 叙述核验数值匹配修误杀（#9）+ 空数据防编数（#10）+ 捕获区两行布局（#11）+ 语音 not-allowed 修复与 deploy-nas.md 沉淀（#8）；verify-minimal 27→37 断言，全量 12 套件 545 断言全绿 |
 | 2026-10-09 | 本批 PR | **v1.10.0 补齐：P10 极简手机端·阶段 1**（三 Tab 布局/AI 捕获首页先草稿后确认/更多页领域分组；三决策落地并记录 roadmap）；新增 verify-minimal 23 断言，全量 12 套件 529 断言全绿 |
 | 2026-10-09 | 本批 PR | **v1.10.0：P3 语音记账 + P6 预算智能建议**（麦克风转写回显可改、录音不落盘；近 6 完整月月均建议区间一键采用、不足 3 个月不推荐、纯统计零 token）；verify-budgets +12 / verify-ai-chat +4，全量 11 套件 503 断言全绿 |

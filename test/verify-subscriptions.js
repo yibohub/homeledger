@@ -314,6 +314,25 @@ db.run(
 cand = subMining.mineCandidates(ledgerId);
 check('周期账单已接管的商户不重复建议', !minedNames().includes('挖掘周期账单'));
 
+/* --- 审查修复回归：超长商户名按 40 字符归一（登记名/dismiss/忽略名单才对得上） --- */
+const longName = '挖掘超长商户' + '名'.repeat(38); // 44 字符：流水允许 60，订阅域上限 40
+[-9, -39, -70].forEach((d) => addMiningTxn(longName, 1750, shift(d)));
+cand = subMining.mineCandidates(ledgerId);
+const longCand = cand.find((c) => c.merchant === longName.slice(0, 40));
+check('超长商户名按 40 字符归一成候选', !!longCand, longCand && longCand.merchant.length + ' 字');
+subMining.ignoreMerchant(ledgerId, longName.slice(0, 40));
+cand = subMining.mineCandidates(ledgerId);
+check('归一后忽略/登记/去重闭环成立', !minedNames().some((n) => n.startsWith('挖掘超长商户')));
+
+/* --- 审查修复回归：同日多笔（双录/导入常见）不杀模式，金额取当日众数 --- */
+[-11, -41, -72].forEach((d) => addMiningTxn('挖掘同日双录', 1750, shift(d)));
+addMiningTxn('挖掘同日双录', 1750, shift(-41)); // 同日双录（同额）
+addMiningTxn('挖掘同日双录', 60000, shift(-72)); // 同日混入一笔大额（当日众数仍是 1750）
+cand = subMining.mineCandidates(ledgerId);
+const dupCand = cand.find((c) => c.merchant === '挖掘同日双录');
+check('同日多笔只留一笔参与成链（gap=0 不再断链）', !!dupCand && dupCand.count === 3 && dupCand.amount_cents === 1750,
+  dupCand && JSON.stringify({ count: dupCand.count, amount: dupCand.amount_cents }));
+
 for (let i = 1; i <= 7; i++) [-6, -36, -67].forEach((d) => addMiningTxn(`挖掘批量${i}号`, 1200, shift(d)));
 cand = subMining.mineCandidates(ledgerId);
 check('候选上限 6 条、按期数优先', cand.length === 6 && cand[0].count >= cand[5].count, `${cand.length} 条，首条 ${cand[0].merchant}`);

@@ -51,6 +51,27 @@ function modeOf(arr) {
   return best ? best[0] : null;
 }
 
+/**
+ * 同日多笔只留一笔（金额取当日众数，平局取先到）：双录 / 导入常见，
+ * 同日 gap=0 会让本成立的模式静默断链（评审建议采纳）
+ */
+function dedupeByDate(txns) {
+  const byDate = new Map();
+  for (const t of txns) {
+    if (!byDate.has(t.txn_date)) byDate.set(t.txn_date, []);
+    byDate.get(t.txn_date).push(t);
+  }
+  const out = [];
+  for (const list of byDate.values()) {
+    const cnt = new Map();
+    for (const t of list) cnt.set(t.amount, (cnt.get(t.amount) || 0) + 1);
+    let pick = list[0];
+    for (const t of list) if (cnt.get(t.amount) > cnt.get(pick.amount)) pick = t;
+    out.push(pick);
+  }
+  return out;
+}
+
 /* ------------------------------ 忽略名单（持久） ------------------------------ */
 
 const ignoredKey = (ledgerId) => `submining.ignored.${Number(ledgerId)}`;
@@ -109,7 +130,9 @@ function mineCandidates(ledgerId, { today = todayStr() } = {}) {
   );
   const byMerchant = new Map();
   for (const r of rows) {
-    const key = String(r.merchant).trim();
+    // 商户名按订阅域上限 40 字符归一（订阅名/dismiss 匹配/忽略名单都在 40 内）：
+    // 流水商户最长 60 字符，不归一的话超长商户既登记不掉也忽略不掉（评审实测抓到的 P2）
+    const key = String(r.merchant).trim().slice(0, 40);
     if (!byMerchant.has(key)) byMerchant.set(key, []);
     byMerchant.get(key).push(r);
   }
@@ -132,8 +155,10 @@ function mineCandidates(ledgerId, { today = todayStr() } = {}) {
   for (const n of ignoredMerchants(ledgerId)) known.add(n);
 
   const out = [];
-  for (const [merchant, txns] of byMerchant) {
-    if (known.has(merchant) || txns.length < MIN_RUN) continue;
+  for (const [merchant, txnsAll] of byMerchant) {
+    if (known.has(merchant) || txnsAll.length < MIN_RUN) continue;
+    const txns = dedupeByDate(txnsAll);
+    if (txns.length < MIN_RUN) continue;
     out.push(...candidatesOf(merchant, txns, today));
   }
   out.sort((a, b) => b.count - a.count || a.merchant.localeCompare(b.merchant, 'zh'));
