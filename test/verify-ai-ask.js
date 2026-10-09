@@ -183,7 +183,32 @@ check('金额为 0 不作硬性要求（「上月无记录」可无数字）',
 check('trend 序列逐月金额都要出现',
   aiAsk.narrationCovers(trendData, '8月 ¥45.00、9月 ¥50.00、10月 ¥35.00。') === true
   && aiAsk.narrationCovers(trendData, '8月 ¥45.00、9月 ¥50.00。') === false);
-check('budget 行要求已用与剩余', aiAsk.narrationCovers({ type: 'budget', rows: [{ used: 3500, remaining: 6500 }] }, '预算已用 ¥35.00，还剩 ¥65.00') === true);
+check('budget 三项都要（预算/已用/剩余）',
+  aiAsk.narrationCovers({ type: 'budget', rows: [{ amount: 10000, used: 3500, remaining: 6500 }] }, '预算 ¥100.00，已用 ¥35.00，还剩 ¥65.00') === true
+  && aiAsk.narrationCovers({ type: 'budget', rows: [{ amount: 10000, used: 3500, remaining: 6500 }] }, '已用 ¥35.00，还剩 ¥65.00') === false
+  && aiAsk.narrationCovers({ type: 'budget', rows: [{ amount: 10000, used: 3500, remaining: 6500 }] }, '预算 ¥100.00，还剩 ¥65.00') === false);
+check('数字边界匹配：「35.00」不被「¥135.00」糊弄',
+  aiAsk.narrationCovers({ type: 'category_summary', total: 3500 }, '花了 ¥135.00。') === false
+  && aiAsk.narrationCovers({ type: 'category_summary', total: 3500 }, '花了 ¥35.00。') === true);
+
+/* 不变式防线：模板自身必须天然通过核验——否则未来改 narrateTemplate/money 格式时，
+   有 Key 用户会静默退化成永远退回模板（无 Key 测试环境不会红，只有这条断言能拦住） */
+const TPL_CASES = [
+  cmpData,
+  trendData,
+  memberTop,
+  { type: 'category_summary', metric: 'expense', label: 'x', category: null, total: 346050, count: 4, whole_total: 346050, share: 1, top_merchant: { name: '美团', total: 123456, count: 2 } },
+  { type: 'budget', metric: 'expense', label: 'x', rows: [{ name: '餐饮', amount: 10000, used: 3500, remaining: 6500, pct: 0.35 }, { name: '总预算', amount: 50000, used: 30000, remaining: 20000, pct: 0.6 }] },
+  { type: 'budget', metric: 'expense', label: 'x', rows: [{ name: '超支的', amount: 5000, used: 8000, remaining: -3000, pct: 1.6 }] },
+  { type: 'merchant', metric: 'expense', keyword: '美团', label: 'x', confirm: false, total: 123456, count: 5, latest: { date: '2026-10-01', amount: 4560, note: 'n' } },
+  { type: 'compare', metric: 'expense', label: 'x', prev_label: 'y', category: null, cur_total: 45400, cur_count: 4, prev_total: 0, prev_count: 0, delta: 45400, pct: null },
+  { type: 'top', by: 'category', metric: 'expense', label: 'x', top_n: 3, rows: [{ name: '居住', total: 320000, count: 1 }] },
+];
+let tplBad = 0;
+for (const d of TPL_CASES) {
+  if (aiAsk.narrationCovers(d, aiAsk.narrateTemplate(d)) !== true) tplBad++;
+}
+check(`模板叙述天然通过自身核验（${TPL_CASES.length} 场景，含零值/超支/千分位大额）`, tplBad === 0, `不过场景数=${tplBad}`);
 
 console.log('\n--- 进程内段完成，进入 HTTP 段 ---\n');
 if (fail) { console.log(`\n结果：${pass} 通过 / ${fail} 失败（进程内段未全过，跳过 HTTP 段）\n`); process.exit(1); }

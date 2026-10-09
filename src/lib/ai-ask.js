@@ -536,7 +536,7 @@ function keyAmountsOf(data) {
     case 'compare': out.push(data.cur_total, data.prev_total, Math.abs(data.delta)); break;
     case 'trend': for (const r of data.series) out.push(r.total); break;
     case 'top': for (const r of data.rows) out.push(r.total); break;
-    case 'budget': for (const r of data.rows) out.push(r.used, Math.abs(r.remaining)); break;
+    case 'budget': for (const r of data.rows) out.push(r.amount, r.used, Math.abs(r.remaining)); break;
     case 'merchant': if (data.count) out.push(data.total); break;
   }
   return out.filter((c) => Number.isFinite(c) && c !== 0);
@@ -545,12 +545,24 @@ function keyAmountsOf(data) {
 /** 归一化后比对：模型可能写 ¥3,460.50 / ¥3460.50 / 3460.50 元，逗号、符号、空格不作数 */
 const normNum = (s) => String(s).replace(/[,\s¥￥元]/g, '');
 
+/** 数字子串带边界匹配：「35.00」不能被「¥135.00」糊弄（前一位是数字即不算命中） */
+function coversNum(t, k) {
+  let i = t.indexOf(k);
+  while (i !== -1) {
+    const before = i > 0 ? t[i - 1] : '';
+    const after = i + k.length < t.length ? t[i + k.length] : '';
+    if (!/\d/.test(before) && !/\d/.test(after)) return true;
+    i = t.indexOf(k, i + 1);
+  }
+  return false;
+}
+
 /** 模型叙述是否覆盖全部关键金额；不覆盖就退回模板（确定性优先，与防臆造账户同一模式） */
 function narrationCovers(data, text) {
   const keys = keyAmountsOf(data).map((c) => (c / 100).toFixed(2));
   if (!keys.length) return true;
   const t = normNum(text);
-  return keys.every((k) => t.includes(k));
+  return keys.every((k) => coversNum(t, k));
 }
 
 function pctText(x) {
@@ -649,16 +661,18 @@ async function handleAssistantText({ text, ledgerId, today = todayStr() }) {
   const range = resolveRange(parsed.query.range, today);
   const data = runQuery(ledgerId, parsed.query, range, today);
   let answer = narrateTemplate(data);
+  const warnings = [];
   if (ai.isAiUsable()) {
     try {
       const modelText = await narrateByModel(q, data, cfg);
       // 叙述数字核验：模型漏掉关键金额（如对比句丢上月基数）就退回模板，确定性优先
       if (narrationCovers(data, modelText)) answer = modelText;
+      else warnings.push('AI 叙述未覆盖全部关键数字，已用标准格式回答');
     } catch {
       // 叙述失败 → 保留模板文案
     }
   }
-  return { mode: 'answer', engine: usedModel ? 'llm' : 'rule', text: answer, data, warnings: [] };
+  return { mode: 'answer', engine: usedModel ? 'llm' : 'rule', text: answer, data, warnings };
 }
 
 module.exports = {
