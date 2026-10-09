@@ -1,16 +1,26 @@
 'use strict';
 /**
- * 回归：手机极简模式（P10 阶段 1，layout-m 三 Tab + 捕获区）
+ * 回归：手机极简模式（P10，layout-m 三 Tab + 捕获区）
  *
  * 需先在 8099 起隔离实例（run-all 自动拉起）。覆盖：
  *   - 布局切换矩阵：手机 UA 自动极简 / 桌面 UA 不自动 / cookie hl_simple 显式开与关
  *   - Tab 结构：三 Tab 导航、/more 领域分组、「切换完整版」入口
  *   - Tab1 内容：大数字、预算条、捕获区（语音/拍账单/文字三入口）、最近 5 笔
  *   - 捕获区管线：草稿确认流走 /api/ai/text → /api/ai/confirm（规则引擎，先草稿后确认）
+ *   - 问账嵌入（阶段 2）：问句走 ai-ask 查账返回回答而非草稿、不改数据；
+ *     只读成员可见捕获区（拍单隐藏）可问不可记；桌面 AI 页文字快记同分流
  *   - 完整版回归：显式 layout 的页面（如 /login）不受极简模式影响
  *
  * 运行：node test/verify-minimal.js
  */
+const fs = require('node:fs');
+const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
+
+// 8099 实例的数据目录：run-all 会把服务端 DATA_DIR 传进环境，手工跑时默认 data-verify
+// （只读矩阵要直连该库改角色；目录名不是 data-verify* 就跳过，防止手工误指真实数据目录）
+const SERVER_DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, '..', 'data-verify');
+
 const BASE = 'http://127.0.0.1:8099';
 const PHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 const DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
@@ -109,6 +119,10 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   const js = await req('GET', '/static/js/m.js', { ua: PHONE_UA });
   check('m.js 可访问且走草稿确认流', js.status === 200 && js.text.includes('/api/ai/text') && js.text.includes('/api/ai/confirm') && js.text.includes('SpeechRecognition'), `HTTP ${js.status}`);
   check('m.js 语音同样要求安全上下文（HTTP 下不亮按钮）', js.status === 200 && js.text.includes('window.isSecureContext'), '');
+  check('m.js 问句分支渲染回答卡（answer/clarify）', js.status === 200 && js.text.includes("data.mode === 'answer'") && js.text.includes('m-answer'), '');
+  check('m.js 拍单按钮判空（只读视图无 mCam 不报错）', js.status === 200 && js.text.includes('if (camBtn)'), '');
+  const djs = await req('GET', '/static/js/app.js', { ua: DESKTOP_UA });
+  check('桌面 AI 页文字快记同分流（问句出回答不建草稿）', djs.status === 200 && djs.text.includes("res.mode === 'answer'"), `HTTP ${djs.status}`);
   const css = await req('GET', '/static/css/app.css', { ua: PHONE_UA });
   check('极简样式已发布', css.status === 200 && css.text.includes('.m-tabbar') && css.text.includes('.m-draft'), `HTTP ${css.status}`);
 
@@ -140,6 +154,40 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   check('明细页可见入账记录（35.00）', r.status === 200 && r.text.includes('35.00'), `HTTP ${r.status}`);
   r = await req('GET', '/', { ua: PHONE_UA });
   check('极简首页「最近 5 笔」出现该记录（非空态占位文案）', r.status === 200 && r.text.includes('m-txn') && /m-txn[\s\S]{0,400}午饭/.test(r.text), '');
+
+  /* --- 问账嵌入 Tab1（阶段 2）：同一输入框，问句走查账、记账句照旧出草稿 --- */
+  const countTxn = (html) => (html.match(/class="m-txn"/g) || []).length;
+  const before = countTxn(r.text);
+  r = await req('POST', '/api/ai/text', { json: { text: '这个月餐饮花了多少' }, ua: PHONE_UA });
+  check('问句返回查账回答而非草稿', r.status === 200 && r.json.ok === true
+    && (r.json.mode === 'answer' || r.json.mode === 'clarify') && (r.json.text || '').length > 0 && r.json.items === undefined,
+    `HTTP ${r.status} mode=${r.json && r.json.mode} text=${r.json ? String(r.json.text).slice(0, 30) : ''}`);
+  check('无 Key 时查账走规则引擎（零依赖降级）', r.json.engine === 'rule', `engine=${r.json && r.json.engine}`);
+  r = await req('GET', '/', { ua: PHONE_UA });
+  check('问句不产生任何新记录（查账只读）', countTxn(r.text) === before, `${before} → ${countTxn(r.text)}`);
+
+  /* --- 只读成员：可见捕获区可问账，拍单隐藏、不可记（直连 8099 实例的库改角色）--- */
+  const dbFile = path.join(SERVER_DATA_DIR, 'homeledger.db');
+  if (/^data-verify/.test(path.basename(SERVER_DATA_DIR)) && fs.existsSync(dbFile)) {
+    const raw = new DatabaseSync(dbFile);
+    raw.exec('PRAGMA busy_timeout = 5000;');
+    const adminId = raw.prepare('SELECT u.id AS id, lm.role FROM ledger_members lm JOIN users u ON u.id = lm.user_id WHERE u.username = ?').get('admin');
+    raw.prepare("UPDATE ledger_members SET role = 'viewer' WHERE user_id = ?").run(adminId.id);
+    r = await req('GET', '/', { ua: PHONE_UA });
+    check('只读成员也见捕获区（可问账），拍单隐藏、主按钮变「提问」', r.status === 200
+      && r.text.includes('id="mCapture"') && r.text.includes('id="mText"') && r.text.includes('id="mGo"')
+      && !r.text.includes('id="mCam"') && r.text.includes('>提问</span>'), `HTTP ${r.status}`);
+    r = await req('POST', '/api/ai/text', { json: { text: '这个月餐饮花了多少' }, ua: PHONE_UA });
+    check('只读成员问句可查账', r.status === 200 && (r.json.mode === 'answer' || r.json.mode === 'clarify'), `HTTP ${r.status} mode=${r.json && r.json.mode}`);
+    r = await req('POST', '/api/ai/text', { json: { text: '可乐 6 元' }, ua: PHONE_UA });
+    check('只读成员记账句被 403 拒绝（JSON 提示可问账）', r.status === 403 && /只读/.test(r.json.error || '') && (r.json.error || '').includes('提问'), `HTTP ${r.status} ${r.json && r.json.error}`);
+    raw.prepare('UPDATE ledger_members SET role = ? WHERE user_id = ?').run(adminId.role, adminId.id);
+    raw.close();
+    r = await req('POST', '/api/ai/text', { json: { text: '晚饭 42 元' }, ua: PHONE_UA });
+    check('恢复角色后记账句照旧出草稿', r.status === 200 && r.json.ok === true && r.json.items.length === 1 && r.json.mode === undefined, `HTTP ${r.status}`);
+  } else {
+    check('（跳过只读矩阵：8099 实例库不可达或非测试目录）', true);
+  }
 
   jar = save; // 清掉显式 cookie，避免影响后续（套件进程内无后续，仅保持整洁）
 

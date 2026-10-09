@@ -1,6 +1,7 @@
 /* ============================================================
-   家账簿 · 手机极简模式（P10 阶段 1）—— Tab1 捕获区
-   悬浮球的全屏形态：语音 / 拍账单 / 文字 → 草稿卡片 → 确认入库。
+   家账簿 · 手机极简模式（P10）—— Tab1 捕获区
+   悬浮球的全屏形态：语音 / 拍账单 / 文字 → 草稿卡片 → 确认入库；
+   问句自动转查账（阶段 2）→ 回答卡片。只读成员只有问账（无拍单按钮）。
    依赖 layout-m.ejs 的 #mCapture 结构与 meta[name=csrf]。
    ============================================================ */
 'use strict';
@@ -36,7 +37,8 @@
 
   /* --------------------------- 图片选择与预览 --------------------------- */
   const pendingImages = [];
-  camBtn.addEventListener('click', () => fileEl.click());
+  // 拍单按钮按可写权限渲染，只读视图（P10 阶段 2）没有它——监听前判空，别让整个捕获区挂掉
+  if (camBtn) camBtn.addEventListener('click', () => fileEl.click());
   fileEl.addEventListener('change', async () => {
     for (const f of Array.from(fileEl.files || [])) {
       if (pendingImages.length >= 6) break;
@@ -133,6 +135,11 @@
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) {
         say('warn', (data && data.error) || '识别失败，请稍后重试');
+      } else if (data.mode === 'answer' || data.mode === 'clarify') {
+        // 问句走查账（P10 阶段 2）：服务端已分流，直接出回答卡，不进草稿管线
+        renderAnswer(data);
+        textEl.value = '';
+        textEl.style.height = 'auto';
       } else if (!data.items || !data.items.length) {
         say('warn', '没有识别到内容，试试「午饭 35 元」或拍一张账单');
       } else {
@@ -148,6 +155,35 @@
       busy = false;
       goBtn.disabled = false;
     }
+  }
+
+  /* --------------------------- 问账回答卡（P10 阶段 2） --------------------------- */
+  // mode=answer 直出统计结论，mode=clarify 反问引导；插到草稿流顶部，内容全走 textContent
+  function renderAnswer(data) {
+    const card = document.createElement('div');
+    card.className = 'm-answer';
+    const tag = document.createElement('div');
+    tag.className = 'm-answer-tag';
+    tag.textContent = (data.engine === 'llm' ? 'AI 问账' : '问账 · 本地规则') + (data.mode === 'clarify' ? '（请补充）' : '');
+    card.appendChild(tag);
+    const body = document.createElement('div');
+    body.className = 'm-answer-body';
+    body.textContent = data.text || '';
+    card.appendChild(body);
+    if (Array.isArray(data.warnings) && data.warnings.length) {
+      const w = document.createElement('div');
+      w.className = 'm-answer-warn';
+      w.textContent = '⚠ ' + data.warnings.join('；');
+      card.appendChild(w);
+    }
+    const meta = document.createElement('div');
+    meta.className = 'm-answer-meta';
+    const rpt = document.createElement('a');
+    rpt.href = '/reports';
+    rpt.textContent = '看报表 →';
+    meta.appendChild(rpt);
+    card.appendChild(meta);
+    draftsEl.insertBefore(card, draftsEl.firstChild);
   }
 
   function draftCard(it) {

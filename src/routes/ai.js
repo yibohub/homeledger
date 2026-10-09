@@ -117,13 +117,55 @@ router.post('/api/ai/confirm', auth.requireLogin, auth.requireLedgerWrite, (req,
   res.json({ ok: created.length > 0, created: created.length, ids: created, linked, errors, redirect: errors.length ? null : '/transactions' });
 });
 
+/* --------------------------- 查询前置分支（共用） --------------------------- */
+
+/**
+ * 查账意图预判（/api/ai/chat 与 /api/ai/text 共用，P10 阶段 2 抽出）：
+ * 是查账句则返回 ai-ask 应答（已写审计）；返回 null 表示不是查询——
+ * 含查询管线故障（故障不挡记账，落回记账管线由调用方处理）。
+ * 只读语义由 ai-ask 保证：查询只做统计，不改任何数据。
+ */
+async function tryAssistantQuery(req, ledgerId, text) {
+  try {
+    const answer = await aiAsk.handleAssistantText({ text, ledgerId });
+    if (answer) {
+      auth.audit(req, 'ai.ask', { ledgerId, detail: `${answer.engine} ${answer.mode}：${text.slice(0, 50)}` });
+      return answer;
+    }
+  } catch (e) {
+    console.error('[ai-ask] 查询管线异常，回退记账分支：', e.message);
+  }
+  return null;
+}
+
 /* ------------------------------ 文本快速识别 ------------------------------ */
 
-router.post('/api/ai/text', auth.requireLogin, auth.requireLedgerWrite, async (req, res) => {
-  const ledgerId = Number(res.locals.ledger.id);
+/**
+ * 文字 → 先判意图再分发（P10 阶段 2 后，极简捕获区与桌面 AI 页共用）：
+ *  - 查询句（「这个月餐饮花了多少」）→ 对话查账（lib/ai-ask），只读成员可问
+ *  - 其余 → 识别出草稿（先草稿后确认，不自动入库），需可写权限
+ */
+router.post('/api/ai/text', auth.requireLogin, async (req, res) => {
+  const ledger = res.locals.ledger;
+  if (!ledger) return res.status(400).json({ ok: false, error: '没有账本，请先创建一个账本' });
+  const ledgerId = Number(ledger.id);
+  const text = String(req.body.text || '').slice(0, 4000).trim();
+  if (!text) return res.status(400).json({ ok: false, error: '请输入账单内容' });
+
+  const answer = await tryAssistantQuery(req, ledgerId, text);
+  if (answer) {
+    return res.json({ ok: true, mode: answer.mode, engine: answer.engine, text: answer.text, data: answer.data, warnings: answer.warnings });
+  }
+
+  // 记账分支：需要可写权限（与 /api/ai/chat 记账分支同语义，JSON 报错方便 fetch 端提示）
+  if (ledger.is_archived) {
+    return res.status(403).json({ ok: false, error: '该账本已归档（只读），请先在「账本管理」中恢复后再记账' });
+  }
+  if (!auth.canWrite(ledger.role)) {
+    return res.status(403).json({ ok: false, error: '你在该账本中只有只读权限，不能记账，但可以直接提问查账（如「这个月餐饮花了多少」）' });
+  }
+
   try {
-    const text = String(req.body.text || '').slice(0, 4000);
-    if (!text.trim()) return res.status(400).json({ ok: false, error: '请输入账单内容' });
     const result = await ai.analyzeBill({ images: [], text, ledgerId });
     const categories = fd.flatCategories(ledgerId);
     res.json({
@@ -161,15 +203,9 @@ router.post('/api/ai/chat', auth.requireLogin, async (req, res) => {
 
     /* ---- 查询分支：不写库，只读成员可用；返回 null 表示不是查询 ---- */
     if (!images.length && text) {
-      try {
-        const answer = await aiAsk.handleAssistantText({ text, ledgerId });
-        if (answer) {
-          auth.audit(req, 'ai.ask', { ledgerId, detail: `${answer.engine} ${answer.mode}：${text.slice(0, 50)}` });
-          return res.json({ ok: true, mode: answer.mode, engine: answer.engine, text: answer.text, data: answer.data, warnings: answer.warnings });
-        }
-      } catch (e) {
-        // 查询管线故障不挡记账：落回下方记账管线（识别不出会走既有的友好返回）
-        console.error('[ai-ask] 查询管线异常，回退记账分支：', e.message);
+      const answer = await tryAssistantQuery(req, ledgerId, text);
+      if (answer) {
+        return res.json({ ok: true, mode: answer.mode, engine: answer.engine, text: answer.text, data: answer.data, warnings: answer.warnings });
       }
     }
 
