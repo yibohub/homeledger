@@ -180,6 +180,9 @@ check('千分位/单位差异不影响核验（¥3,460.50 = ¥3460.50 = 3460.50�
   && aiAsk.narrationCovers({ type: 'category_summary', total: 346050 }, '共花了 3460.50元。') === true);
 check('金额为 0 不作硬性要求（「上月无记录」可无数字）',
   aiAsk.narrationCovers({ type: 'compare', cur_total: 45400, prev_total: 0, delta: 45400 }, '这个月花了 ¥454.00，上个月没有记录。') === true);
+check('对比类上期为 0 仍须口头交代基数（真实 Key 验证抓到的漏网案例）',
+  aiAsk.narrationCovers({ type: 'compare', cur_total: 45400, prev_total: 0, delta: 45400 }, '这个月比上个月多花了¥454.00元。') === false
+  && aiAsk.narrationCovers({ type: 'compare', cur_total: 45400, prev_total: 0, delta: 45400 }, '本月 ¥454.00，上月 ¥0.00，多 ¥454.00。') === true);
 check('trend 序列逐月金额都要出现',
   aiAsk.narrationCovers(trendData, '8月 ¥45.00、9月 ¥50.00、10月 ¥35.00。') === true
   && aiAsk.narrationCovers(trendData, '8月 ¥45.00、9月 ¥50.00。') === false);

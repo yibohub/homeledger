@@ -510,7 +510,7 @@ const NARRATE_SYSTEM_PROMPT = `你是家庭记账助手。根据给定的统计�
 1. 用 1~3 句话直接给结论，自然口语，不啰嗦。
 2. 只能使用统计结果里出现的数字和名称，禁止自己计算、估算或补充任何新数字。
 3. 金额字段是「分」，32450 表示 ¥324.50；输出统一写成 ¥xxx.xx，不要更换精度或自己换算错的数值。
-4. 回答必须带上统计结果中的全部关键金额，省略任何关键数字都是不合格回答：对比类必须同时给出本期、上一期与增减额；汇总类给金额与笔数；预算类给预算、已用与剩余；趋势类逐月金额；排行类每个名次的金额；商户类给笔数与合计（有最近一笔也要给）。
+4. 回答必须带上统计结果中的全部关键金额，省略任何关键数字都是不合格回答：对比类必须同时给出本期、上一期与增减额（上一期为 0 时要明确说「上个月没有支出/记录」）；汇总类给金额与笔数；预算类给预算、已用与剩余；趋势类逐月金额；排行类每个名次的金额；商户类给笔数与合计（有最近一笔也要给）。
 5. 直接输出回答文字，不要 JSON，不要 Markdown。`;
 
 async function narrateByModel(question, data, cfg) {
@@ -562,7 +562,14 @@ function narrationCovers(data, text) {
   const keys = keyAmountsOf(data).map((c) => (c / 100).toFixed(2));
   if (!keys.length) return true;
   const t = normNum(text);
-  return keys.every((k) => coversNum(t, k));
+  if (!keys.every((k) => coversNum(t, k))) return false;
+  // 对比类上期为 0：金额豁免可以，但基数必须口头交代（「上个月没有支出」/「上月 ¥0.00」），
+  // 否则「多花了¥454」式的无参照回答会溜过（真实 Key 验证抓到的案例）。
+  // 注意在原文上匹配且防数字内 0 误中：「454.00 元」里的 0 不算交代了基数
+  if (data.type === 'compare' && data.prev_total === 0 && data.cur_total !== 0) {
+    return /(没有|无|未记录|为零|¥\s*0|(?<![\d.])0元)/.test(String(text));
+  }
+  return true;
 }
 
 function pctText(x) {
