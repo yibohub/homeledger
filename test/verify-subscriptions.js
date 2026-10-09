@@ -15,6 +15,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SUB_DATA_DIR = path.join(__dirname, '..', 'data-verify-sub');
+// 8099 实例的数据目录：run-all 会把服务端 DATA_DIR 传进环境，必须在下面覆盖前捕获
+// （HTTP 挖掘段要直连服务端的库种流水；手工跑时默认 data-verify）
+const SERVER_DATA_DIR = process.env.DATA_DIR && process.env.DATA_DIR !== SUB_DATA_DIR
+  ? path.resolve(process.env.DATA_DIR)
+  : path.join(__dirname, '..', 'data-verify');
 process.env.DATA_DIR = SUB_DATA_DIR;
 fs.rmSync(SUB_DATA_DIR, { recursive: true, force: true });
 
@@ -240,7 +245,81 @@ check('固定到期日过期展示：已到期 2 天', overdueDeco.dueLabel === 
 const sumsFixed = subs.overview(ledgerId);
 check('固定到期日进入即将扣费统计', sumsFixed.live.some((s) => s.id === idFixedDue && s.daysLeft === 0), `候选 ${sumsFixed.live.filter((s) => s.daysLeft !== null && s.daysLeft <= 7).length} 条`);
 
+/* ============================ A2. 订阅模式挖掘（进程内） ============================ */
+
+console.log('\n=== A2. 订阅模式挖掘（P5，进程内）===\n');
+const subMining = require('../src/lib/sub-mining');
+const daysBetween = (a, b) => Math.round((new Date(`${a}T00:00:00`) - new Date(`${b}T00:00:00`)) / 86400000);
+
+function addMiningTxn(merchant, amount, dateStr) {
+  db.run(
+    `INSERT INTO transactions (ledger_id, type, amount_cents, currency, rate, amount_base_cents, account_id, category_id,
+      user_id, txn_date, note, merchant, status, source, created_at, updated_at)
+     VALUES (?,'expense',?,'CNY',1,?,?,?,?,?,'挖掘测试',?,'cleared','manual',?,?)`,
+    ledgerId, amount, amount, accountId, catId, uid, dateStr, merchant, db.nowStr(), db.nowStr()
+  );
+}
+
+/* --- 造模式：命中 / 各类不命中 --- */
+[-8, -38, -69, -100].forEach((d, i) => addMiningTxn('挖掘月度视频', i % 2 ? 2600 : 2400, shift(d))); // 间隔 30/31/31，金额 ±10% 内
+[-3, -40, -95, -150].forEach((d) => addMiningTxn('挖掘偶尔买', 2000, shift(d))); // 间隔不规则
+[-10, -40, -71, -102].forEach((d, i) => addMiningTxn('挖掘涨价会员', i === 3 ? 3000 : 2000, shift(d))); // 末次金额跳档 >10%
+[-5, -12, -19, -26].forEach((d) => addMiningTxn('挖掘周卡', 1000, shift(d))); // 周付
+[-400, -765, -1130].forEach((d) => addMiningTxn('挖掘年费域名', 9900, shift(d))); // 年付（最后一期 400 天前仍算活着）
+[-200, -230, -260].forEach((d) => addMiningTxn('挖掘已停订', 1500, shift(d))); // 月度但停扣 200 天
+
+let cand = subMining.mineCandidates(ledgerId);
+const minedNames = () => cand.map((c) => c.merchant);
+const findMined = (n) => cand.find((c) => c.merchant === n);
+check('月度模式命中候选', minedNames().includes('挖掘月度视频'), minedNames().join('，'));
+check('周付识别为每周', findMined('挖掘周卡') && findMined('挖掘周卡').cycle === 'weekly');
+check('年付识别为每年', findMined('挖掘年费域名') && findMined('挖掘年费域名').cycle === 'yearly');
+check('间隔不规则不成候选', !minedNames().includes('挖掘偶尔买'));
+check('金额跳档超 ±10% 不成候选', !minedNames().includes('挖掘涨价会员'));
+check('停扣超过 2 个月不挖（不再打扰）', !minedNames().includes('挖掘已停订'));
+
+const mc = findMined('挖掘月度视频');
+check('候选金额取段内中位数（分）', mc && mc.amount_cents === 2500, mc && String(mc.amount_cents));
+check('候选带期数 / 锚点日 / 周期文案', mc && mc.count === 4 && mc.anchor_day === Number(shift(-8).slice(8, 10)) && mc.cycleLabel === '每月',
+  mc && JSON.stringify({ count: mc.count, anchor_day: mc.anchor_day, label: mc.cycleLabel }));
+check('预测下次扣费日在最近一期后 25–36 天', mc && daysBetween(mc.next_charge_at, mc.last_date) >= 25 && daysBetween(mc.next_charge_at, mc.last_date) <= 36,
+  mc && `${mc.last_date} → ${mc.next_charge_at}`);
+check('账户/分类预填取段内众数', mc && Number(mc.account_id) === accountId && Number(mc.category_id) === catId);
+
+/* --- 已登记 / 取消 / 忽略的语义 --- */
+addSub({ name: '挖掘月度视频', amount_cents: 2500, next_charge_at: shift(20), anchor_day: 15 });
+cand = subMining.mineCandidates(ledgerId);
+check('已登记（未取消）的商户不再建议', !minedNames().includes('挖掘月度视频'));
+db.run("UPDATE subscriptions SET status = 'canceled', canceled_at = ? WHERE name = '挖掘月度视频'", db.nowStr());
+cand = subMining.mineCandidates(ledgerId);
+check('已取消的订阅、流水仍在续 → 重新建议', minedNames().includes('挖掘月度视频'));
+
+subMining.ignoreMerchant(ledgerId, '挖掘周卡');
+cand = subMining.mineCandidates(ledgerId);
+check('「不是订阅」持久忽略', !minedNames().includes('挖掘周卡') && subMining.ignoredMerchants(ledgerId).includes('挖掘周卡'));
+
+/* --- 软删除与候选上限 --- */
+[-15, -45, -76].forEach((d) => addMiningTxn('挖掘软删', 800, shift(d)));
+db.run("UPDATE transactions SET deleted_at = ? WHERE merchant = '挖掘软删' AND txn_date < ?", db.nowStr(), shift(-20));
+cand = subMining.mineCandidates(ledgerId);
+check('软删除的交易不参与挖掘', !minedNames().includes('挖掘软删'));
+
+/* --- 周期账单已接管的不重复建议（那边能自动记账，是功能超集） --- */
+db.run(
+  `INSERT INTO recurring_rules (ledger_id, name, payload, frequency, interval_n, next_run_at, auto_post, is_active, created_at)
+   VALUES (?, '挖掘周期账单', '{}', 'monthly', 1, ?, 1, 1, ?)`,
+  ledgerId, shift(10), db.nowStr()
+);
+[-7, -37, -68].forEach((d) => addMiningTxn('挖掘周期账单', 3000, shift(d)));
+cand = subMining.mineCandidates(ledgerId);
+check('周期账单已接管的商户不重复建议', !minedNames().includes('挖掘周期账单'));
+
+for (let i = 1; i <= 7; i++) [-6, -36, -67].forEach((d) => addMiningTxn(`挖掘批量${i}号`, 1200, shift(d)));
+cand = subMining.mineCandidates(ledgerId);
+check('候选上限 6 条、按期数优先', cand.length === 6 && cand[0].count >= cand[5].count, `${cand.length} 条，首条 ${cand[0].merchant}`);
+
 /* ============================ B. HTTP 端到端 ============================ */
+
 
 const BASE = 'http://127.0.0.1:8099';
 let cookie = '';
@@ -382,6 +461,65 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   check('删除后该订阅的操作入口消失（不再出现在列表）', !r.text.includes(`/subscriptions/${idAdobe}/charge`));
   const txnStill = await req('GET', '/transactions?source=subscription');
   check('删除订阅不影响已生成的流水', txnStill.text.includes('Adobe 全家桶'));
+
+  /* --- 订阅挖掘（P5）：HTTP 端到端（直连 8099 实例的库种流水，run-all 会传 DATA_DIR） --- */
+  const dbFile = path.join(SERVER_DATA_DIR, 'homeledger.db');
+  if (/^data-verify/.test(path.basename(SERVER_DATA_DIR)) && fs.existsSync(dbFile)) {
+    const { DatabaseSync } = require('node:sqlite');
+    const raw = new DatabaseSync(dbFile);
+    raw.exec('PRAGMA busy_timeout = 5000;');
+    const adminRow = raw.prepare("SELECT id FROM users WHERE username = 'admin'").get();
+    const homeRow = raw.prepare(
+      'SELECT l.id AS lid, a.id AS aid FROM ledgers l JOIN accounts a ON a.ledger_id = l.id WHERE l.id = (SELECT MIN(id) FROM ledgers)'
+    ).get();
+    const seed = (merchant, amount, dateStr) => raw.prepare(
+      `INSERT INTO transactions (ledger_id, type, amount_cents, currency, rate, amount_base_cents, account_id, category_id,
+        user_id, txn_date, note, merchant, status, source, created_at, updated_at)
+       VALUES (?,'expense',?,'CNY',1,?,?,NULL,?,?,'挖掘种子',?,'cleared','manual',datetime('now'),datetime('now'))`
+    ).run(homeRow.lid, amount, amount, homeRow.aid, adminRow.id, dateStr, merchant);
+
+    // 候选卡与一键登记
+    [-5, -35, -66].forEach((d) => seed('挖掘HTTP视频', 1500, shift(d)));
+    r = await req('GET', '/subscriptions');
+    check('订阅页出现「可能是订阅」候选卡', r.text.includes('可能是订阅') && r.text.includes('挖掘HTTP视频') && r.text.includes('登记为订阅'));
+    const anchorDay = Number(shift(-5).slice(8, 10));
+    const reg = await req('POST', '/subscriptions', {
+      form: { _csrf: csrfOf(r.text), name: '挖掘HTTP视频', amount: '15.00', cycle: 'monthly', anchor_day: String(anchorDay), next_charge_at: shift(25), reminder_days: '3' },
+    });
+    check('候选一键登记返回 302', reg.status === 302, `HTTP ${reg.status}`);
+    r = await req('GET', '/subscriptions');
+    check('登记后进入列表、候选卡消失、默认仅提醒（不自动记账防重复入账）',
+      r.text.includes('已添加') && !r.text.includes('登记为订阅') && r.text.includes('仅提醒'));
+
+    // 「不是订阅」忽略（顺带验证 suggest-dismiss 不被 /subscriptions/:id 遮蔽）
+    [-4, -34, -64].forEach((d) => seed('挖掘误报商户', 2200, shift(d)));
+    r = await req('GET', '/subscriptions');
+    check('新误报模式出现候选', r.text.includes('挖掘误报商户'));
+    const dis = await req('POST', '/subscriptions/suggest-dismiss', { form: { _csrf: csrfOf(r.text), merchant: '挖掘误报商户' } });
+    check('「不是订阅」返回 302', dis.status === 302, `HTTP ${dis.status}`);
+    r = await req('GET', '/subscriptions');
+    check('忽略成功的提示出现（flash 本身带商户名）', r.text.includes('已忽略') && r.text.includes('挖掘误报商户'));
+    r = await req('GET', '/subscriptions');
+    check('忽略后候选卡不再出现（专用路由未被 /:id 遮蔽才会真忽略）', !r.text.includes('挖掘误报商户') && !r.text.includes('id="sub-mining"'));
+
+    // 只读成员不算候选（挖了也没法一键登记）
+    [-3, -33, -63].forEach((d) => seed('挖掘只读视图', 3100, shift(d)));
+    const origRole = raw.prepare(
+      'SELECT lm.role FROM ledger_members lm JOIN users u ON u.id = lm.user_id WHERE u.username = ? AND lm.ledger_id = ?'
+    ).get('admin', homeRow.lid);
+    try {
+      raw.prepare("UPDATE ledger_members SET role = 'viewer' WHERE user_id = ? AND ledger_id = ?").run(adminRow.id, homeRow.lid);
+      r = await req('GET', '/subscriptions');
+      check('只读成员不挖候选（候选卡片区不出现）', !r.text.includes('可能是订阅') && !r.text.includes('挖掘只读视图'));
+    } finally {
+      raw.prepare('UPDATE ledger_members SET role = ? WHERE user_id = ? AND ledger_id = ?').run(origRole.role, adminRow.id, homeRow.lid);
+      raw.close();
+    }
+    r = await req('GET', '/subscriptions');
+    check('恢复可写后候选恢复', r.text.includes('挖掘只读视图'));
+  } else {
+    check('（跳过订阅挖掘 HTTP 段：8099 实例库不可达或非测试目录）', true);
+  }
 
   console.log(`\n结果：${pass} 通过 / ${fail} 失败\n`);
   process.exit(fail ? 1 : 0);

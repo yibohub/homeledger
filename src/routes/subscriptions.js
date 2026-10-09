@@ -8,6 +8,7 @@ const auth = require('../lib/auth');
 const fd = require('../lib/formdata');
 const u = require('../lib/util');
 const subs = require('../lib/subscriptions');
+const subMining = require('../lib/sub-mining');
 
 const router = express.Router();
 
@@ -84,12 +85,30 @@ router.get('/subscriptions', auth.requireLogin, (req, res) => {
   if (!ledger) return res.redirect('/');
   const ledgerId = Number(ledger.id);
   const sums = subs.overview(ledgerId);
+  // 订阅挖掘（P5）：只对可写成员算候选（只读成员没法一键登记，挖了也白挖）
+  const mined = auth.canWrite(ledger.role) ? subMining.mineCandidates(ledgerId) : [];
   res.render('subscriptions', {
     title: '订阅扣费', activeNav: 'subscriptions',
-    sums, presets: PRESETS, today: todayStr(),
+    sums, presets: PRESETS, today: todayStr(), mined,
     form: fd.txFormData(ledgerId, req.session.userId),
     edit: null,
   });
+});
+
+/* -------------------------- 订阅挖掘：忽略候选（P5） ------------------------- */
+
+/**
+ * 「不是订阅」一键忽略（持久）。必须注册在 POST /subscriptions/:id 之前，
+ * 否则会被 :id 路由吞掉（/bulk 遮蔽同款坑，见 solutions/route-shadowing.md）。
+ * 只允许忽略当前真实挖到的候选，防 settings 被塞任意内容。
+ */
+router.post('/subscriptions/suggest-dismiss', auth.requireLogin, auth.requireLedgerWrite, (req, res) => {
+  const ledgerId = Number(res.locals.ledger.id);
+  const name = String(req.body.merchant || '').trim().slice(0, 40);
+  const hit = subMining.mineCandidates(ledgerId).some((c) => c.merchant === name);
+  if (hit) subMining.ignoreMerchant(ledgerId, name);
+  res.flash(hit ? 'success' : 'error', hit ? `已忽略「${name}」的订阅建议（再挖到也不会打扰）` : '没有找到这个候选，请刷新页面后重试');
+  res.redirect('/subscriptions');
 });
 
 /* --------------------------------- 编辑页 --------------------------------- */
@@ -101,7 +120,7 @@ router.get('/subscriptions/:id/edit', auth.requireLogin, auth.requireLedgerWrite
   const sums = subs.overview(ledgerId);
   res.render('subscriptions', {
     title: '编辑订阅', activeNav: 'subscriptions',
-    sums, presets: PRESETS, today: todayStr(),
+    sums, presets: PRESETS, today: todayStr(), mined: [],
     form: fd.txFormData(ledgerId, req.session.userId),
     edit: subs.decorate(row),
     history: subs.chargesOf(ledgerId, row.id),

@@ -38,6 +38,45 @@
 
 <div class="grid grid-main">
   <div>
+    <% /* 订阅挖掘（P5）：从流水里挖到的固定周期扣费，只建议不自动创建 */ %>
+    <% if (mined && mined.length) { %>
+    <div class="card mb12" id="sub-mining">
+      <div class="card-head">
+        <h2>可能是订阅</h2>
+        <span class="tiny muted">流水里连续 ≥3 期、金额和间隔都固定，登记后到期提醒</span>
+      </div>
+      <% mined.forEach(function(m){ %>
+      <div class="row between wrap" style="padding:7px 0;border-bottom:1px dashed var(--border);gap:8px">
+        <span class="small">
+          <b><%= m.merchant %></b>
+          <span class="tiny muted"><%= m.cycleLabel %>约 <%= helpers.fmtAmount(m.amount_cents) %> · 连续 <%= m.count %> 期（<%= m.first_date %> ~ <%= m.last_date %>）</span>
+        </span>
+        <span class="row" style="gap:6px;flex:0 0 auto">
+          <form method="post" action="/subscriptions" style="display:inline">
+            <input type="hidden" name="_csrf" value="<%= csrf %>">
+            <input type="hidden" name="name" value="<%= m.merchant %>">
+            <input type="hidden" name="amount" value="<%= (m.amount_cents / 100).toFixed(2) %>">
+            <input type="hidden" name="cycle" value="<%= m.cycle %>">
+            <input type="hidden" name="anchor_day" value="<%= m.anchor_day %>">
+            <% if (m.anchor_month) { %><input type="hidden" name="anchor_month" value="<%= m.anchor_month %>"><% } %>
+            <input type="hidden" name="next_charge_at" value="<%= m.next_charge_at %>">
+            <% if (m.account_id) { %><input type="hidden" name="account_id" value="<%= m.account_id %>"><% } %>
+            <% if (m.category_id) { %><input type="hidden" name="category_id" value="<%= m.category_id %>"><% } %>
+            <input type="hidden" name="reminder_days" value="3">
+            <button class="btn btn-sm btn-primary">登记为订阅</button>
+          </form>
+          <form method="post" action="/subscriptions/suggest-dismiss" style="display:inline">
+            <input type="hidden" name="_csrf" value="<%= csrf %>">
+            <input type="hidden" name="merchant" value="<%= m.merchant %>">
+            <button class="btn btn-sm btn-ghost">不是订阅</button>
+          </form>
+        </span>
+      </div>
+      <% }); %>
+      <div class="tiny muted mt8">登记默认<b>仅提醒、不自动记账</b>（这些扣费你一直在手动记，避免重复入账）；判定标准：同商户、每期金额相差 ±10% 内、间隔固定（周/月/季/半年/年 ±3 天）且连续 ≥3 期。</div>
+    </div>
+    <% } %>
+
     <% if (!sums.items.length) { %>
       <div class="card">
         <div class="empty">
