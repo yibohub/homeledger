@@ -1,7 +1,7 @@
 # 项目看板（docs/BOARD.md）
 
 > **单一入口**：家账簿做到哪、下一步做啥、什么押后了。回答「下一步」先看这里，不要翻 ai-roadmap/solutions 找进度——那里只放设计与根因，不重复状态。
-> **最近更新**：2026-10-09（v1.10.0 批次补齐 P10 阶段 1，AI 路线仅剩 P5/P7/P8/P9 与 P10 阶段 2；三个 tag 均待维护者推）
+> **最近更新**：2026-10-09（v1.10.0 已发版：tag 已推、GHCR 双架构镜像公开可拉；剩 NAS 部署两命令 + 每日备份任务在维护者侧）
 
 ## 怎么维护（规则）
 
@@ -18,12 +18,13 @@
 
 ## 🎯 进行中
 
-### 发版收尾（等维护者操作）
-> 逐版登记台账（含 v1.8.0 同样待打 tag）：[versions.md](versions.md)；发版后把 ⏳ 改 ✅
-- [ ] 推 `v1.8.0` / `v1.9.0` / `v1.10.0` 三个标签（手动逐个：`git tag vX.Y.Z && git push origin vX.Y.Z`）→ CI 构建双架构镜像并发布 GHCR
-- [ ] GHCR 包设为 Public（网页一次性：头像 → Packages → homeledger → Change visibility）
-- [ ] NAS compose 切镜像 `ghcr.milu.moe/yibohub/homeledger:latest` → `docker compose pull && up -d`
+### v1.10.0 发版（2026-10-09 已推 tag）
+- [x] 推 `v1.10.0` 标签 → CI 双架构构建成功（run 37942146937），GHCR 发布 `1.10.0` / `1.10` / `latest` / `sha-7c2d79c`
+- [x] GHCR 包匿名可拉（公开，无需再设 visibility）；v1.8.0 / v1.9.0 未单独打 tag，变更随 v1.10.0 发布（见 [versions.md](versions.md)）
+- [ ] **NAS 部署（维护者操作，DSM 终端两条命令）**：`cd /volume1/docker/homeledger && docker compose pull && docker compose up -d`
+      （升级前建议先备份数据库；compose 若锁版本号，把 image 改为 `ghcr.milu.moe/yibohub/homeledger:1.10.0` 或 `latest`）
 - [ ] NAS 计划任务：每日自动备份 `/volume1/docker/homeledger/data` 到另一共享文件夹
+- [ ] 部署后验证：`http://<NAS-IP>:5111/healthz` 200 + 关于页显示 v1.10.0；手机访问自动进极简模式
 
 ---
 
