@@ -220,6 +220,9 @@ function updateTransaction(id, ledgerId, userId, d) {
   const toAccountId = pickAccount(ledgerId, d.to_account_id);
   if (type === 'transfer' && (!accountId || !toAccountId)) throw new Error('转账需要选择转出与转入账户');
   if (type === 'transfer' && accountId === toAccountId) throw new Error('转出与转入账户不能相同');
+  // 与 createTransaction 同规则：编辑改型成投资买卖时缺双账户/同账户会让资金凭空蒸发或净效果为 0
+  if ((type === 'invest_buy' || type === 'invest_sell') && (!accountId || !toAccountId)) throw new Error('投资买入/卖出需要选择付款与入账账户');
+  if ((type === 'invest_buy' || type === 'invest_sell') && accountId === toAccountId) throw new Error('投资交易的双方账户不能相同');
   run(
     `UPDATE transactions SET type=?, amount_cents=?, currency=?, rate=?, amount_base_cents=?, account_id=?,
        to_account_id=?, category_id=?, txn_date=?, note=?, merchant=?, status=?, is_reimbursable=?,

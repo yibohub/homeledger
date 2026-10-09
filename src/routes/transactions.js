@@ -129,52 +129,9 @@ router.post('/', auth.requireLogin, auth.requireLedgerWrite, (req, res) => {
   }
 });
 
-/* ---------------------------------- 编辑 ---------------------------------- */
-
-router.get('/:id/edit', auth.requireLogin, auth.requireLedgerWrite, (req, res) => {
-  const ledgerId = Number(res.locals.ledger.id);
-  const t = txn.getTransaction(Number(req.params.id), ledgerId);
-  if (!t) return res.status(404).render('error', { title: '记录不存在', message: '该笔记录可能已被删除。' });
-  const form = fd.txFormData(ledgerId, req.session.userId);
-  res.render('txn-form', {
-    title: '编辑记录', activeNav: 'transactions', mode: 'edit', form, t,
-    splitRows: txn.splitsOf(t.id),
-    splits: txn.splitsOf(t.id),
-    images: att.listByTxn(t.id),
-    back: req.query.back || '/transactions',
-  });
-});
-
-router.post('/:id', auth.requireLogin, auth.requireLedgerWrite, (req, res) => {
-  const ledgerId = Number(res.locals.ledger.id);
-  const id = Number(req.params.id);
-  const data = readForm(req.body);
-  try {
-    txn.updateTransaction(id, ledgerId, req.session.userId, data);
-    auth.audit(req, 'txn.update', { entity: 'transaction', entityId: id, ledgerId });
-    res.flash('success', '已保存修改');
-    res.redirect(safeBack(req.body.back));
-  } catch (e) {
-    const form = fd.txFormData(ledgerId, req.session.userId);
-    const t = txn.getTransaction(id, ledgerId);
-    res.status(400).render('txn-form', {
-      title: '编辑记录', activeNav: 'transactions', mode: 'edit', form,
-      t: { ...t, ...data, amount: (data.amount_cents / 100).toFixed(2) },
-      splitRows: data.splits, splits: data.splits, back: safeBack(req.body.back), error: e.message,
-    });
-  }
-});
-
-router.post('/:id/delete', auth.requireLogin, auth.requireLedgerWrite, (req, res) => {
-  const ledgerId = Number(res.locals.ledger.id);
-  const ok = txn.softDelete(Number(req.params.id), ledgerId);
-  auth.audit(req, 'txn.delete', { entity: 'transaction', entityId: Number(req.params.id), ledgerId });
-  if (req.body._json === '1') return res.json({ ok });
-  res.flash(ok ? 'success' : 'error', ok ? '已删除' : '记录不存在');
-  res.redirect(safeBack(req.body.back));
-});
-
 /* --------------------------------- 批量操作 -------------------------------- */
+// 注意：必须注册在 POST /:id（编辑）之前，否则 /transactions/bulk 会被 /:id 匹配成
+// id="bulk" 落进编辑分支报「记录不存在」（v1.0.0 起曾因此导致网页批量操作全部失效）
 
 router.post('/bulk', auth.requireLogin, auth.requireLedgerWrite, (req, res) => {
   const ledgerId = Number(res.locals.ledger.id);
@@ -235,6 +192,51 @@ router.post('/bulk', auth.requireLogin, auth.requireLedgerWrite, (req, res) => {
     default:
       res.flash('error', '未知操作');
   }
+  res.redirect(safeBack(req.body.back));
+});
+
+/* ---------------------------------- 编辑 ---------------------------------- */
+
+router.get('/:id/edit', auth.requireLogin, auth.requireLedgerWrite, (req, res) => {
+  const ledgerId = Number(res.locals.ledger.id);
+  const t = txn.getTransaction(Number(req.params.id), ledgerId);
+  if (!t) return res.status(404).render('error', { title: '记录不存在', message: '该笔记录可能已被删除。' });
+  const form = fd.txFormData(ledgerId, req.session.userId);
+  res.render('txn-form', {
+    title: '编辑记录', activeNav: 'transactions', mode: 'edit', form, t,
+    splitRows: txn.splitsOf(t.id),
+    splits: txn.splitsOf(t.id),
+    images: att.listByTxn(t.id),
+    back: req.query.back || '/transactions',
+  });
+});
+
+router.post('/:id', auth.requireLogin, auth.requireLedgerWrite, (req, res) => {
+  const ledgerId = Number(res.locals.ledger.id);
+  const id = Number(req.params.id);
+  const data = readForm(req.body);
+  try {
+    txn.updateTransaction(id, ledgerId, req.session.userId, data);
+    auth.audit(req, 'txn.update', { entity: 'transaction', entityId: id, ledgerId });
+    res.flash('success', '已保存修改');
+    res.redirect(safeBack(req.body.back));
+  } catch (e) {
+    const form = fd.txFormData(ledgerId, req.session.userId);
+    const t = txn.getTransaction(id, ledgerId);
+    res.status(400).render('txn-form', {
+      title: '编辑记录', activeNav: 'transactions', mode: 'edit', form,
+      t: { ...t, ...data, amount: (data.amount_cents / 100).toFixed(2) },
+      splitRows: data.splits, splits: data.splits, back: safeBack(req.body.back), error: e.message,
+    });
+  }
+});
+
+router.post('/:id/delete', auth.requireLogin, auth.requireLedgerWrite, (req, res) => {
+  const ledgerId = Number(res.locals.ledger.id);
+  const ok = txn.softDelete(Number(req.params.id), ledgerId);
+  auth.audit(req, 'txn.delete', { entity: 'transaction', entityId: Number(req.params.id), ledgerId });
+  if (req.body._json === '1') return res.json({ ok });
+  res.flash(ok ? 'success' : 'error', ok ? '已删除' : '记录不存在');
   res.redirect(safeBack(req.body.back));
 });
 
