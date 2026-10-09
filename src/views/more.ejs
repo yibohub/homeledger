@@ -1,0 +1,41 @@
+<div class="m-page">
+  <section class="m-card">
+    <div class="m-more-head">
+      <b>更多功能</b>
+      <a class="tiny muted" href="/ui-mode?simple=0">切换完整版 →</a>
+    </div>
+    <div class="m-more-group">
+      <div class="m-more-title">记账</div>
+      <a class="m-more-item" href="/transactions/new"><svg class="icon"><use href="#i-pencil"></use></svg>记一笔</a>
+      <a class="m-more-item" href="/calendar"><svg class="icon"><use href="#i-calendar-days"></use></svg>记账日历</a>
+      <a class="m-more-item" href="/ai"><svg class="icon"><use href="#i-bot"></use></svg>AI 截图记账</a>
+      <a class="m-more-item" href="/search"><svg class="icon"><use href="#i-search"></use></svg>搜索筛选</a>
+    </div>
+    <div class="m-more-group">
+      <div class="m-more-title">分析</div>
+      <a class="m-more-item" href="/reports"><svg class="icon"><use href="#i-chart-column"></use></svg>报表分析</a>
+    </div>
+    <div class="m-more-group">
+      <div class="m-more-title">资产与计划</div>
+      <a class="m-more-item" href="/accounts"><svg class="icon"><use href="#i-credit-card"></use></svg>账户管理</a>
+      <a class="m-more-item" href="/budgets"><svg class="icon"><use href="#i-target"></use></svg>预算管理</a>
+      <a class="m-more-item" href="/subscriptions"><svg class="icon"><use href="#i-receipt"></use></svg>订阅扣费</a>
+      <a class="m-more-item" href="/debts"><svg class="icon"><use href="#i-hand-coins"></use></svg>借贷台账</a>
+      <a class="m-more-item" href="/goals"><svg class="icon"><use href="#i-piggy-bank"></use></svg>储蓄目标</a>
+    </div>
+    <div class="m-more-group">
+      <div class="m-more-title">数据</div>
+      <a class="m-more-item" href="/categories"><svg class="icon"><use href="#i-tag"></use></svg>分类管理</a>
+      <a class="m-more-item" href="/tags"><svg class="icon"><use href="#i-tags"></use></svg>标签管理</a>
+      <% if (canWrite(ledger.role)) { %><a class="m-more-item" href="/import"><svg class="icon"><use href="#i-download"></use></svg>账单导入</a><% } %>
+      <a class="m-more-item" href="/export"><svg class="icon"><use href="#i-upload"></use></svg>导出备份</a>
+    </div>
+    <div class="m-more-group">
+      <div class="m-more-title">协作与系统</div>
+      <a class="m-more-item" href="/ledgers"><svg class="icon"><use href="#i-library"></use></svg>账本管理</a>
+      <a class="m-more-item" href="/members"><svg class="icon"><use href="#i-users-round"></use></svg>成员权限</a>
+      <a class="m-more-item" href="/settings"><svg class="icon"><use href="#i-settings"></use></svg>设置</a>
+      <a class="m-more-item" href="/about"><svg class="icon"><use href="#i-info"></use></svg>关于</a>
+    </div>
+  </section>
+</div>

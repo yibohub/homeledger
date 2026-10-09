@@ -24,7 +24,7 @@ ZCode 及其他编码代理在本仓库的工作指引（自动加载）。本�
 ```bash
 npm start                            # 起服务 :5111（数据 ./data；plain node 无 --watch，改码需重启）
 npm run dev                          # --watch 模式
-node test/run-all.js                 # 全量回归：11 套件，各自起独立实例 :8099（跑前确保 8099 无残留）
+node test/run-all.js                 # 全量回归：12 套件，各自起独立实例 :8099（跑前确保 8099 无残留）
 node test/selfcheck-static.js        # 静态自检
 DATA_DIR=./data-demo node scripts/seed-demo.js   # 演示数据（独立目录，不碰真实数据）
 ```
@@ -49,7 +49,7 @@ DATA_DIR=./data-demo node scripts/seed-demo.js   # 演示数据（独立目录�
 - 提交信息中文：发版 `vX.Y.Z: 要点`，过程提交 `docs:` / `fix:` / `feat:` / `test:` 前缀
 
 **质量**
-- 每个功能配 `test/verify-*.js` 套件并登记 `run-all.js`；**全量 11 套件全绿才算完成**（Windows 本地也要绿）
+- 每个功能配 `test/verify-*.js` 套件并登记 `run-all.js`；**全量 12 套件全绿才算完成**（Windows 本地也要绿）
 - 数字靠统计（SQL）、语言靠模型：模型不做任何算术；AI 产出必须可溯源（原文依据或习惯统计），标注如实
 - 出网内容仅限账单原文 + 分类/账户名称清单 + 聚合值，不发完整流水；无 AI Key 时功能必须有降级路径
 - 过程中发现「应调/可调」的事项（UX 口径、小优化、观察到的瑕疵）**当场登记 BOARD 或提 issue**，不口头一提了之——口头观察随会话丢失；**已实现/已顺手修掉的不登记**，提交信息说明即可

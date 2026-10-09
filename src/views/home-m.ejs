@@ -1,0 +1,69 @@
+<div class="m-page" id="mHome">
+  <script type="application/json" id="mAccounts"><%- JSON.stringify(mAccounts || []) %></script>
+  <!-- 本月大数字 + 预算条 -->
+  <section class="m-card m-hero">
+    <div class="m-hero-month"><%= monthLabel %></div>
+    <div class="m-hero-nums">
+      <div class="m-hero-num expense">
+        <span class="k">支出</span>
+        <b class="v"><%= helpers.fmtAmount(cur.expense) %></b>
+      </div>
+      <div class="m-hero-num income">
+        <span class="k">收入</span>
+        <b class="v"><%= helpers.fmtAmount(cur.income) %></b>
+      </div>
+    </div>
+    <% if (budgets && budgets.length) { %>
+    <% const b = budgets[0]; %>
+    <div class="m-budget">
+      <div class="m-budget-row">
+        <span><%= b.category_name ? b.category_name : '总预算' %></span>
+        <span class="tiny muted"><%= helpers.fmtAmount(b.used) %> / <%= helpers.fmtAmount(Number(b.amount_cents)) %></span>
+      </div>
+      <div class="bar <%= b.ratio >= 100 ? 'over' : b.ratio >= (b.alert_pct || 80) ? 'warn' : '' %>">
+        <div class="bar-fill" style="width:<%= Math.min(100, Math.round(b.ratio)) %>%"></div>
+      </div>
+      <% if (budgets.length > 1) { %>
+      <a class="tiny muted" href="/budgets">还有 <%= budgets.length - 1 %> 个预算 →</a>
+      <% } %>
+    </div>
+    <% } %>
+  </section>
+
+  <% if (canWrite(ledger.role)) { %>
+  <!-- AI 捕获区：悬浮球的全屏形态（语音 / 拍账单 / 文字），先草稿后确认 -->
+  <section class="m-card m-capture" id="mCapture">
+    <div class="m-capture-input">
+      <textarea id="mText" rows="1" placeholder="说一句或输入：午饭 35 元" inputmode="text"></textarea>
+      <button id="mMic" class="m-capture-btn" type="button" title="语音输入" aria-label="语音输入" hidden><svg class="icon"><use href="#i-mic"></use></svg></button>
+      <button id="mCam" class="m-capture-btn" type="button" title="拍账单" aria-label="拍账单"><svg class="icon"><use href="#i-camera"></use></svg></button>
+      <button id="mGo" class="m-capture-btn primary" type="button" title="识别" aria-label="识别"><svg class="icon"><use href="#i-sparkles"></use></svg></button>
+      <input id="mFile" type="file" accept="image/*" multiple hidden>
+    </div>
+    <div id="mThumbs" class="m-thumbs hidden"></div>
+    <div id="mDrafts"></div>
+    <div id="mMsg" class="m-capture-msg hidden"></div>
+  </section>
+  <% } %>
+
+  <!-- 最近 5 笔 -->
+  <section class="m-card">
+    <div class="m-card-head">
+      <b>最近 5 笔</b>
+      <a class="tiny" href="/transactions">全部 →</a>
+    </div>
+    <% if (!recent || !recent.length) { %>
+    <div class="m-empty">还没有记录，说一句「午饭 35 元」试试</div>
+    <% } else { %>
+    <div class="m-recent">
+      <% recent.slice(0, 5).forEach(function(t){ %>
+      <a class="m-txn" href="/transactions/<%= t.id %>/edit">
+        <span class="ico"><%= t.category_icon || t.type_icon %></span>
+        <span class="m"><b><%= t.merchant || t.note || t.type_label %></b><span class="tiny muted"><%= t.txn_date.slice(5) %> · <%= t.category_path %></span></span>
+        <span class="amt <%= t.is_income ? 'income' : t.is_expense ? 'expense' : '' %>"><%= t.is_income ? '+' : t.is_expense ? '−' : '' %><%= helpers.fmtAmount(t.amount_base_cents) %></span>
+      </a>
+      <% }); %>
+    </div>
+    <% } %>
+  </section>
+</div>
