@@ -72,7 +72,8 @@
 
   /* --------------------------- 语音（与悬浮球 assistant.js 同规则；改一处记得同步另一处） --------------------------- */
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (micBtn && SR) {
+  // 同 assistant.js：非安全上下文（HTTP 访问 NAS）下 Web Speech 只会报 not-allowed，不亮按钮
+  if (micBtn && SR && window.isSecureContext) {
     micBtn.hidden = false;
     let rec = null;
     let listening = false;
@@ -93,7 +94,11 @@
       rec.onend = () => { listening = false; textEl.readOnly = false; micBtn.classList.remove('listening'); };
       rec.onerror = (e) => {
         textEl.readOnly = false;
-        if (e.error !== 'no-speech' && e.error !== 'aborted') say('warn', '语音识别失败（' + e.error + '），可以直接输入');
+        if (e.error !== 'no-speech' && e.error !== 'aborted') {
+          say('warn', e.error === 'not-allowed'
+            ? '麦克风被浏览器拒绝（需 HTTPS 访问并授权），可以直接输入或用系统键盘听写'
+            : '语音识别失败（' + e.error + '），可以直接输入');
+        }
       };
       listening = true;
       micBtn.classList.add('listening');

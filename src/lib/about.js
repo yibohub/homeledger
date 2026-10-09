@@ -43,6 +43,15 @@ const FEATURES = [
  */
 const CHANGELOG = [
   {
+    version: '1.10.1',
+    date: '2026-10-09',
+    tag: '当前版本',
+    items: [
+      '修复 NAS 部署后语音按钮报「not-allowed」的体验：根因是 Web Speech API 仅在 HTTPS（安全上下文）可用，HTTP 访问 NAS 时浏览器直接拒绝麦克风——现麦克风按钮在非安全上下文不再出现，错误提示改为对症说明（需 HTTPS + 授权），并沉淀 DSM 反向代理 + 自签证书的解决方案（docs/solutions/deploy-nas.md）',
+    ],
+  },
+
+  {
     version: '1.10.0',
     date: '2026-10-09',
     tag: '当前版本',
