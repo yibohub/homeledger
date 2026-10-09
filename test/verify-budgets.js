@@ -107,6 +107,39 @@ const prCustom = sch.budgetPeriodRange({ period: 'custom', start_date: '2026-10-
 check('自定义周期起止填反自动交换', prCustom.start === '2026-10-01' && prCustom.end === '2026-10-31', `${prCustom.start}~${prCustom.end}`);
 check('月度区间为本月 1 日~月末', monthRange.start.endsWith('-01') && monthRange.end >= monthRange.start, `${monthRange.start}~${monthRange.end}`);
 
+/* --- 预算智能建议（P6）：近 6 个完整自然月（不含本月）月均 + 建议区间 --- */
+// 近 4 个完整月每月 30 元餐饮（子分类 A），跨年也正确（Date 数学回退月份）
+const monthBack = (n) => {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() - n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+};
+for (let back = 1; back <= 4; back++) addTxn(kids[0].id, 3000, 'expense', `${monthBack(back)}-15`);
+// 收入口径只铺 2 个月（触发「历史不足」）
+for (let back = 1; back <= 2; back++) addTxn(incomeKid.id, 5000, 'income', `${monthBack(back)}-15`);
+
+const sg = sch.budgetSuggestion({ ledger_id: ledgerId, scope: 'category', category_id: root.id, trigger_type: 'expense' });
+check('分类建议：近 4 个月有记录（covered=4，本月与更早不计）', sg.enough === true && sg.months_covered === 4, JSON.stringify(sg));
+check('分类建议：avg6=120/6=20 元、avg3=30 元（只看最近 3 个完整月）', sg.avg6_cents === 2000 && sg.avg3_cents === 3000, `avg6=${sg.avg6_cents} avg3=${sg.avg3_cents}`);
+check('分类建议：区间 = 月均×1.05~1.1 取整到元（21~22 元）', sg.suggest_low_cents === 2100 && sg.suggest_high_cents === 2200, `low=${sg.suggest_low_cents} high=${sg.suggest_high_cents}`);
+const sgAll = sch.budgetSuggestion({ ledger_id: ledgerId, scope: 'overall', trigger_type: 'expense' });
+check('总预算口径也有建议（窗口内 4 个月 ≥3）', sgAll.enough === true && sgAll.months_covered >= 3, JSON.stringify(sgAll));
+const sgInc = sch.budgetSuggestion({ ledger_id: ledgerId, scope: 'category', category_id: incomeRoot.id, trigger_type: 'income' });
+check('历史不足 3 个月不给建议（收入口径仅 2 个月）', sgInc.enough === false && sgInc.months_covered === 2, JSON.stringify(sgInc));
+const sgThin = sch.budgetSuggestion({ ledger_id: ledgerId, scope: 'account', account_id: accountId, trigger_type: 'expense' });
+check('账户口径可用（同窗口）', sgThin.enough === true && sgThin.months_covered === 4, JSON.stringify(sgThin));
+// 跨年窗口：固定日期 + 固定参照日，不依赖真实运行日期
+const crossCat = Number(db.run(
+  'INSERT INTO categories (ledger_id, name, kind, parent_id, is_system, sort_order) VALUES (?,?,?,?,0,0)',
+  ledgerId, '跨年测试分类', 'expense', null
+).lastInsertRowid);
+for (const d of ['2025-11-15', '2025-12-15', '2026-01-15']) addTxn(crossCat, 1000, 'expense', d);
+const sgCross = sch.budgetSuggestion({ ledger_id: ledgerId, scope: 'category', category_id: crossCat, trigger_type: 'expense' }, new Date('2026-03-10T00:00:00'));
+check('窗口跨年正确（参照 2026-03 → 2025-09~2026-02，命中 3 个月，avg6=5 元）',
+  sgCross.enough === true && sgCross.months_covered === 3 && sgCross.avg6_cents === 500
+  && sgCross.suggest_low_cents === 500 && sgCross.suggest_high_cents === 600, JSON.stringify(sgCross));
+
 /* ============================ B. HTTP 端到端 ============================ */
 
 const BASE = 'http://127.0.0.1:8099';
@@ -123,7 +156,8 @@ async function req(method, p, { form, headers = {} } = {}) {
   const sc = res.headers.getSetCookie?.() || [];
   if (sc.length) cookie = sc.map((c) => c.split(';')[0]).join('; ');
   const buf = Buffer.from(await res.arrayBuffer());
-  return { status: res.status, text: buf.toString('utf8') };
+  const text = buf.toString('utf8');
+  return { status: res.status, text, json: (() => { try { return JSON.parse(text); } catch { return null; } })() };
 }
 const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1];
 
@@ -183,6 +217,34 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   });
   r = await req('GET', '/budgets');
   check('编辑后保留收入统计口径', r.text.includes('收入E2E改') && r.text.includes('统计收入'), '');
+
+  /* --- 预算智能建议（P6）：页面挂载 + 接口出数 --- */
+  check('表单挂载建议容器与拉取逻辑', r.text.includes('id="b-suggest"') && r.text.includes('/api/budgets/suggest'), '');
+  r = await req('GET', '/api/budgets/suggest?scope=overall&trigger_type=expense');
+  check('空历史不给建议（covered=0）', r.status === 200 && r.json.ok === true && r.json.suggestion.enough === false && r.json.suggestion.months_covered === 0, r.text.slice(0, 120));
+  // 造 3 个完整月的历史（本月不计），走记账接口保证口径一致
+  const nf = await req('GET', '/transactions/new');
+  const accId = (nf.text.match(/name="account_id"[\s\S]*?<option value="(\d+)"/) || [])[1];
+  const backMonth = (n) => {
+    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - n);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+  for (let back = 1; back <= 3; back++) {
+    await req('POST', '/transactions', {
+      form: { _csrf: csrf, type: 'expense', amount: '50.00', account_id: accId, category_id: optExp[1], txn_date: `${backMonth(back)}-15`, note: '预算建议造数' },
+    });
+  }
+  r = await req('GET', `/api/budgets/suggest?scope=category&category_id=${optExp[1]}&trigger_type=expense`);
+  const sg = r.json && r.json.suggestion;
+  check('接口建议：3 个月各 50 元 → avg6=25、区间 26~28 元',
+    sg && sg.enough === true && sg.months_covered === 3 && sg.avg6_cents === 2500 && sg.avg3_cents === 5000
+    && sg.suggest_low_cents === 2600 && sg.suggest_high_cents === 2800, r.text.slice(0, 160));
+  r = await req('GET', '/api/budgets/suggest?scope=category&category_id=999999999&trigger_type=expense');
+  check('非法分类 id 返回 400（不冒充总口径）', r.status === 400 && r.json && r.json.ok === false, `HTTP ${r.status}`);
+  r = await req('GET', '/api/budgets/suggest?scope=category&trigger_type=expense');
+  check('分类口径未选 id 不给建议（enough=false 而非总口径数字）', r.status === 200 && r.json.suggestion.enough === false && r.json.suggestion.months_covered === 0, r.text.slice(0, 100));
+  const noAuth = await fetch(BASE + '/api/budgets/suggest?scope=overall', { headers: { Accept: 'application/json' }, redirect: 'manual' });
+  check('未登录拒绝', noAuth.status !== 200, `HTTP ${noAuth.status}`);
 
   console.log(`\n结果：${pass} 通过 / ${fail} 失败\n`);
   process.exit(fail ? 1 : 0);

@@ -130,6 +130,7 @@
         <div class="field">
           <label>预算金额</label>
           <input type="text" name="amount" inputmode="decimal" placeholder="2000.00" required>
+          <div id="b-suggest" class="notice small mt8 hidden"></div>
         </div>
         <div class="field">
           <label>统计范围</label>
@@ -215,8 +216,60 @@
     document.getElementById('b-acc').classList.toggle('hidden', sel.value !== 'account');
     syncCatPair(catExp, catInc, trig);
   }
-  if (sel) { sel.addEventListener('change', toggle); toggle(); }
-  if (trig) trig.addEventListener('change', function(){ syncCatPair(catExp, catInc, trig); });
+  if (sel) { sel.addEventListener('change', function(){ toggle(); refreshSuggest(); }); toggle(); }
+  if (trig) trig.addEventListener('change', function(){ syncCatPair(catExp, catInc, trig); refreshSuggest(); });
+  [catExp, catInc].forEach(function(c){ if (c) c.addEventListener('change', refreshSuggest); });
+
+  /* 预算智能建议（P6）：按当前口径查近 6 个完整自然月月均，给建议区间；
+     历史不足 3 个月不推荐。点击建议可直接填入金额框 */
+  var suggestEl = document.getElementById('b-suggest');
+  var amountInput = document.querySelector('form[action="/budgets"] input[name="amount"]');
+  function fmtYuan(cents) { return '¥' + (cents / 100).toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
+  function refreshSuggest() {
+    if (!suggestEl || !amountInput) return;
+    var catSel = trig && trig.value === 'income' ? catInc : catExp;
+    // 口径要求选分类/账户但还没选时不查询——绝不能拿总口径的数字冒充所选口径的建议
+    if (sel && sel.value === 'category' && (!catSel || !catSel.value)) { suggestEl.classList.add('hidden'); return; }
+    if (sel && sel.value === 'account') {
+      var accPre = document.querySelector('form[action="/budgets"] select[name="account_id"]');
+      if (!accPre || !accPre.value) { suggestEl.classList.add('hidden'); return; }
+    }
+    var qs = new URLSearchParams({
+      scope: sel ? sel.value : 'overall',
+      trigger_type: trig ? trig.value : 'expense',
+    });
+    if (sel && sel.value === 'category' && catSel && catSel.value) qs.set('category_id', catSel.value);
+    if (sel && sel.value === 'account') {
+      var accSel = document.querySelector('form[action="/budgets"] select[name="account_id"]');
+      if (accSel && accSel.value) qs.set('account_id', accSel.value);
+    }
+    fetch('/api/budgets/suggest?' + qs.toString(), { headers: { Accept: 'application/json' } })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (!d || !d.ok || !d.suggestion) { suggestEl.classList.add('hidden'); return; }
+        var s = d.suggestion;
+        if (!s.enough) {
+          suggestEl.textContent = '近 6 个月该口径的记录不足 ' + s.months_covered + '/3 个月，暂无建议';
+          suggestEl.classList.remove('hidden');
+          return;
+        }
+        var low = fmtYuan(s.suggest_low_cents), high = fmtYuan(s.suggest_high_cents);
+        suggestEl.innerHTML = '';
+        var span = document.createElement('span');
+        span.textContent = '近 6 个月月均 ' + fmtYuan(s.avg6_cents) + '（近 3 个月 ' + fmtYuan(s.avg3_cents) + '）· 建议 ';
+        suggestEl.appendChild(span);
+        // 均值极小（< 0.5 元）时区间会取整到 0，没有可采用的数，只展示月均
+        if (s.suggest_low_cents > 0) {
+          var btn = document.createElement('button');
+          btn.type = 'button'; btn.className = 'btn btn-sm'; btn.textContent = '采用 ' + low + ' ~ ' + high;
+          btn.addEventListener('click', function() { amountInput.value = (s.suggest_high_cents / 100).toFixed(2); amountInput.focus(); });
+          suggestEl.appendChild(btn);
+        }
+        suggestEl.classList.remove('hidden');
+      })
+      .catch(function() { suggestEl.classList.add('hidden'); });
+  }
+  refreshSuggest();
 
   /* 每条预算的内联编辑表单：范围/统计对象联动（与新建表单一致） */
   document.querySelectorAll('.budget-edit-form').forEach(function(f) {

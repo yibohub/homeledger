@@ -128,6 +128,51 @@
     });
   }
 
+  /* --------------------------- 语音输入（P3） --------------------------- */
+  /* Web Speech API（Chrome/Edge/Android Safari）：转写文本只回显到输入框可改，
+     不自动发送。转写由浏览器自带语音服务完成（Chrome/Edge 下音频经厂商云端），
+     应用自身不落盘、不转发，也不经手音频。不支持的浏览器按钮保持隐藏。 */
+  const micBtn = $('aiMic');
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (micBtn && SR) {
+    micBtn.hidden = false;
+    let rec = null;
+    let listening = false;
+    micBtn.addEventListener('click', () => {
+      if (listening) { try { rec.stop(); } catch { /* ignore */ } return; }
+      rec = new SR();
+      rec.lang = 'zh-CN';
+      rec.interimResults = true;
+      rec.continuous = false;
+      const base = textEl.value.trim();
+      // 录音中锁定输入框：onresult 是「起始快照 + 全量转写」覆盖式回填，录音中手输会被冲掉
+      textEl.readOnly = true;
+      rec.onresult = (e) => {
+        let s = '';
+        for (let i = 0; i < e.results.length; i++) s += e.results[i][0].transcript;
+        textEl.value = base ? base + '，' + s : s;
+        textEl.dispatchEvent(new Event('input'));
+      };
+      rec.onend = () => {
+        listening = false;
+        textEl.readOnly = false;
+        micBtn.classList.remove('listening');
+        micBtn.title = '语音输入';
+        textEl.focus();
+      };
+      rec.onerror = (e) => {
+        textEl.readOnly = false; // 保险：个别实现 error 后不派发 end
+        if (e.error !== 'no-speech' && e.error !== 'aborted') {
+          addBubble('bot error', '语音识别失败（' + esc(e.error) + '），也可以直接打字');
+        }
+      };
+      listening = true;
+      micBtn.classList.add('listening');
+      micBtn.title = '停止并填入';
+      try { rec.start(); } catch { listening = false; micBtn.classList.remove('listening'); }
+    });
+  }
+
   /* ------------------------------ 气泡 ------------------------------ */
   function addBubble(cls, html) {
     const d = document.createElement('div');

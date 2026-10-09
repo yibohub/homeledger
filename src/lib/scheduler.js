@@ -173,6 +173,57 @@ function budgetUsedInRange(b, start, end) {
   return Number(get(sql, ...params)?.s || 0);
 }
 
+/**
+ * 预算智能建议（P6）：按当前表单口径统计近 6 个完整自然月（不含本月，进行中的月份
+ * 会把月均拉低）的月均，给出建议区间（近 6 月月均 × 1.05–1.1，取整到元）。
+ * 纯本地统计零模型；窗口内有记录的月份不足 3 个视为历史不足，不推荐。
+ * @param {object} o 与 budgets 表同形的最小口径 {ledger_id, scope, category_id, account_id, trigger_type}
+ */
+function budgetSuggestion(o, ref = new Date()) {
+  const y = ref.getFullYear();
+  const m = ref.getMonth();
+  // 近 6 个完整月：上月起往前 6 个月（本月进行中，不计）；Date 数学自动处理跨年
+  const monthAt = (back) => {
+    const d = new Date(y, m - back, 1);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+  };
+  const months = Array.from({ length: 6 }, (_, i) => monthAt(i + 1));
+  const scope = { ...o, trigger_type: o.trigger_type === 'income' ? 'income' : 'expense' };
+
+  // 有记录的月份数 + 近 6 月/近 3 月合计，一次查询按月分组
+  const params = [o.ledger_id, `${months[5]}-01`, `${months[0]}-31`];
+  const typeCond = scope.trigger_type === 'income' ? "AND type IN ('income')" : "AND type IN ('expense','fee')";
+  let sql = `SELECT strftime('%Y-%m', txn_date) AS mo, SUM(amount_base_cents) AS s, COUNT(*) AS c
+             FROM transactions WHERE ledger_id = ? AND deleted_at IS NULL AND txn_date BETWEEN ? AND ? ${typeCond}`;
+  if (scope.scope === 'category' && scope.category_id) {
+    sql += ' AND (category_id = ? OR category_id IN (SELECT id FROM categories WHERE parent_id = ?))';
+    params.push(scope.category_id, scope.category_id);
+  }
+  if (scope.scope === 'account' && scope.account_id) {
+    sql += ' AND account_id = ?';
+    params.push(scope.account_id);
+  }
+  sql += ' GROUP BY mo';
+  const rows = all(sql, ...params);
+  const byMonth = new Map(rows.map((r) => [r.mo, { sum: Number(r.s || 0), cnt: Number(r.c || 0) }]));
+
+  const covered = [...byMonth.values()].filter((v) => v.cnt > 0).length;
+  const sum6 = months.reduce((s, mo) => s + (byMonth.get(mo)?.sum || 0), 0);
+  const sum3 = months.slice(0, 3).reduce((s, mo) => s + (byMonth.get(mo)?.sum || 0), 0);
+  if (covered < 3) return { enough: false, months_covered: covered };
+
+  const avg6 = Math.round(sum6 / 6);
+  const avg3 = Math.round(sum3 / 3);
+  return {
+    enough: true,
+    months_covered: covered,
+    avg6_cents: avg6,
+    avg3_cents: avg3,
+    suggest_low_cents: Math.round((avg6 * 1.05) / 100) * 100,
+    suggest_high_cents: Math.round((avg6 * 1.1) / 100) * 100,
+  };
+}
+
 function checkBudgets() {
   const budgets = all('SELECT * FROM budgets WHERE is_active = 1');
   const ref = new Date();
@@ -308,4 +359,4 @@ function initScheduler() {
   return timer;
 }
 
-module.exports = { initScheduler, runDaily, runDueRecurring, runSubscriptions, checkBudgets, checkDebts, checkGoals, budgetPeriodRange, budgetUsedInRange, budgetUsed, advanceDate, ruleItems };
+module.exports = { initScheduler, runDaily, runDueRecurring, runSubscriptions, checkBudgets, checkDebts, checkGoals, budgetPeriodRange, budgetUsedInRange, budgetUsed, budgetSuggestion, advanceDate, ruleItems };
