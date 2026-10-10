@@ -126,12 +126,19 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
       && js.text.indexOf("vv.addEventListener('resize'") < js.text.indexOf("getElementById('mCapture')"), '');
   check('m.js 问句分支渲染回答卡（answer/clarify）', js.status === 200 && js.text.includes("data.mode === 'answer'") && js.text.includes('m-answer'), '');
   check('m.js 拍单按钮判空（只读视图无 mCam 不报错）', js.status === 200 && js.text.includes('if (camBtn)'), '');
+  check('m.js 识别 busy 反馈（图标旋转 + 「识别中…」+ finally 复原文案，AI 返回前不误认为卡死）',
+    js.status === 200 && js.text.includes("classList.add('busy')") && js.text.includes('识别中…')
+      && js.text.includes("classList.remove('busy')") && js.text.includes('goSpan.textContent = goLabel'), '');
   check('m.js 账户一律下拉可改（推荐预选 + 「可改」提示，维护者反馈修复）', js.status === 200 && js.text.includes('m-draft-acc-row') && js.text.includes('按习惯推荐，可改'), '');
   const djs = await req('GET', '/static/js/app.js', { ua: DESKTOP_UA });
   check('桌面 AI 页文字快记同分流（问句出回答不建草稿）', djs.status === 200 && djs.text.includes("res.mode === 'answer'"), `HTTP ${djs.status}`);
+  check('桌面文字快记也有 busy 反馈 + finally 复原（断网不卡死按钮）',
+    djs.status === 200 && djs.text.includes('识别中…') && /quickBtn\.textContent = oldLabel/.test(djs.text)
+      && djs.text.includes('quickBtn.disabled = false'), '');
   const css = await req('GET', '/static/css/app.css', { ua: PHONE_UA });
   check('极简样式已发布', css.status === 200 && css.text.includes('.m-tabbar') && css.text.includes('.m-draft'), `HTTP ${css.status}`);
   check('键盘态藏底栏样式已发布（body.kb-open .m-tabbar）', css.status === 200 && css.text.includes('body.kb-open .m-tabbar'), '');
+  check('识别 busy 动画样式已发布（mSpin 旋转）', css.status === 200 && css.text.includes('.m-capture-btn.busy .icon') && css.text.includes('@keyframes mSpin'), '');
 
   /* --- 捕获区草稿确认流（规则引擎端到端）--- */
   setJar(1);

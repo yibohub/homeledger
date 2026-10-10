@@ -161,12 +161,19 @@
 
   /* --------------------------- 识别 → 草稿卡片 --------------------------- */
   let busy = false;
+  // 识别按钮的文案（可写视图「识别」/只读视图「提问」）——busy 结束后还原
+  const goSpan = goBtn.querySelector('span');
+  const goLabel = goSpan ? goSpan.textContent : '';
   async function recognize() {
     if (busy) return;
     const text = textEl.value.trim();
     if (!text && !pendingImages.length) return;
     busy = true;
     goBtn.disabled = true;
+    // AI 返回要几秒：图标转起来 + 文案变「识别中…」，别让用户以为卡死
+    goBtn.classList.add('busy');
+    goBtn.setAttribute('aria-busy', 'true'); // 读屏用户同样感知进行中状态
+    if (goSpan) goSpan.textContent = '识别中…';
     clearSay();
     try {
       const isPhoto = pendingImages.length > 0;
@@ -197,6 +204,9 @@
     } finally {
       busy = false;
       goBtn.disabled = false;
+      goBtn.classList.remove('busy');
+      goBtn.removeAttribute('aria-busy');
+      if (goSpan) goSpan.textContent = goLabel;
     }
   }
 
