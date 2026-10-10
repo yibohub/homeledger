@@ -1,7 +1,7 @@
 # 项目看板（docs/BOARD.md）
 
 > **单一入口**：家账簿做到哪、下一步做啥、什么押后了。回答「下一步」先看这里，不要翻 ai-roadmap/solutions 找进度——那里只放设计与根因，不重复状态。
-> **最近更新**：2026-10-10（v1.11.0 已发版，剩 NAS 部署在维护者侧；verify-importers 导入/导出回归套件已落地，全量 13 套件 639 断言）
+> **最近更新**：2026-10-10（v1.11.0 已发版；**项目已部署到云服务器，NAS 侧工作押后**；verify-importers 已合并 PR #22，全量 13 套件 639 断言）
 
 ## 怎么维护（规则）
 
@@ -21,9 +21,7 @@
 ### v1.11.0 发版（2026-10-10 已推 tag）
 - [x] 推 `v1.11.0` 标签 → CI 双架构构建成功（run 38034850136），GHCR 发布 `1.11.0` / `latest`（匿名可拉已验证）
 - [x] 批次内容：P10 阶段 2 问账嵌入 Tab1 + **P5 订阅模式挖掘** + 查账可靠性修复 + 手机端体验三轮（账户可改下拉 / 软键盘避让 / 识别等待反馈）——详见「已完成」与 [versions.md](versions.md)；发版前全量 12 套件 583 断言全绿，版本三件套一致
-- [ ] **NAS 部署（维护者操作；当前跑 v1.10.0）**：`cd /volume1/docker/homeledger && docker compose pull && docker compose up -d`（升级前建议先备份数据库；镜像走 ghcr.milu.moe 中转，详见 [solutions/deploy-nas.md](solutions/deploy-nas.md)）
-- [ ] NAS 计划任务：每日自动备份 `/volume1/docker/homeledger/data` 到另一共享文件夹
-- [ ] 部署后验证：`http://<NAS-IP>:5111/healthz` 200 + 关于页显示 1.11.0；手机捕获区输问句出回答卡、订阅页看「可能是订阅」候选、键盘弹出底栏避让
+- [x] 收尾：NAS 侧三项（部署 / 每日备份 / 部署后验证）经维护者决定押后——**项目已部署到云服务器**（见押后表与 [solutions/deploy-caddy-docker.md](solutions/deploy-caddy-docker.md)）
 
 ### v1.10.0 发版（2026-10-09 已推 tag）
 - [x] 推 `v1.10.0` 标签 → CI 双架构构建成功（run 37942146937），GHCR 发布 `1.10.0` / `1.10` / `latest` / `sha-7c2d79c`
@@ -33,9 +31,6 @@
 ---
 
 ## 📋 待办（下一步，按优先级）
-
-### ★ solutions/deploy-nas.md：NAS 部署运维知识沉淀
-**已起步**（2026-10-09）：[deploy-nas.md](solutions/deploy-nas.md) 已沉淀语音 not-allowed 根因与 DSM 反代方案、发版到 NAS 标准路径。剩余待补：群晖 Container Manager 步骤（`user: "0:0"` 缘由）/ 镜像源切换顺序（中转 → DaoCloud → 南大 → 手动 load）/ ZeroTier 组网与 DSM 防火墙 / 邀请注册流程。
 
 ### selfcheck-static 版本三件套一致性断言
 `package.json` / `about.js` CHANGELOG 最新条目 / `README.md` 更新记录首条，三处版本号必须一致——防手工漂移。约半小时。
@@ -83,6 +78,8 @@
 
 | 押后项 | 押后原因 | 触发条件 | 来源 |
 |---|---|---|---|
+| NAS 切 v1.11.0 镜像 / NAS 每日备份计划任务 / NAS 部署后验证 | **项目已部署到云服务器**（[deploy-caddy-docker.md](solutions/deploy-caddy-docker.md)），维护者决定 NAS 侧工作暂缓（2026-10-10） | 维护者要求切回或新增 NAS 部署时（流程见 [deploy-nas.md](solutions/deploy-nas.md)） | 2026-10-10 维护者决策 |
+| deploy-nas.md 运维知识沉淀剩余四项（Container Manager `user: "0:0"` 缘由 / 镜像源切换顺序 / ZeroTier 与 DSM 防火墙 / 邀请注册流程） | NAS 侧暂缓后没有操作场景可记录；已沉淀部分（语音 not-allowed、反代、标准发版路径）保留有效 | 维护者下次实际操作 NAS 时边操作边补 | 2026-10-10 维护者决策（原 2026-10-09 待办） |
 | web AI 端点每用户频控 | 查询分支先于写权限检查，只读成员可触发 LLM 调用（/api/ai/text + /api/ai/chat 两处，与 v1.9.0 悬浮球同类既有面，家庭自托管接受） | 多成员日常使用或发现 token 异常消耗时 | 2026-10-09 PR #12 审查 |
 | 国产浏览器语音兜底（服务端转写） | Web Speech 识别依赖浏览器厂商云服务：华为鸿蒙浏览器 API 存在但无后端（三层权限全开仍 not-allowed，2026-10-10 实测确诊）；维护者确认其设备网页录音 getUserMedia 可用（vivitage 项目在用），方案技术可行。**2026-10-10 维护者决定暂不做，用输入法听写** | 维护者改主意要点话筒时：getUserMedia+MediaRecorder 录音 → 已配 OpenAI 兼容接口 /audio/transcriptions 转写 | 2026-10-10 华为手机实测 |
 | 麦克风按钮去留 | 华为手机（主力设备）浏览器点话筒必败（无识别后端），按钮在该设备形同虚设但报错有键盘听写引导；iPhone Safari / 桌面 Chrome/Edge 可正常用 | 维护者测过其他手机后决定：留=维持现状（不可用环境点按钮得到对症提示）；去=移除语音入口 | 2026-10-10 维护者决策 |
