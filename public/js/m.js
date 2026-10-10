@@ -15,6 +15,7 @@
   var vv = window.visualViewport;
   var base = 0; // 键盘收起时的可视全高基线：只在「干净高度」（不小于现基线且判定为收起）上学，
   // 键盘开着时的载入/中间高度学不进来，学小了也会在收起时自愈
+  var scale0 = 1; // 基准对应的本页干净态 scale（ArkWeb 常态 0.96 且页面间漂移，捏合判定用相对值不用魔数）
   var open = false;
   var pend = 0; // 高度稳定去抖句柄
 
@@ -25,14 +26,18 @@
   }
   function apply() {
     var h = vh();
-    // 缩掉 >25% 视为键盘弹出。键盘=布局视口一起缩（vv≈ih），捏合放大=只有视觉视口缩
-    // （vv≪ih）——用 vv/ih 比例区分两者：ArkWeb 常态 scale 0.96 且页面间不一，
-    // scale 魔数守卫在页面间不可靠（华为真机排查结论，见 solutions/deploy-nas.md 坑二）；
-    // 地址栏收展只有 ~8% 不误触。不绑 focus/blur：点「识别」时焦点转移先关键盘，
-    // 布局抖动可能吞掉这次点击
+    // 缩掉 >25% 视为键盘弹出。捏合放大在任何内核上都只有视觉视口缩（vv≪ih）且 scale
+    // 相对本页干净态明显变大——双条件排除；键盘则按内核形态二选一：resizes-content
+    // （ArkWeb/安卓系）ih 一起缩 → ratio≈1；resizes-visual（iOS）ih 不变 → ratio 小但
+    // scale 不变（≤干净态 ×1.05）。地址栏收展只有 ~8% 不误触。不绑 focus/blur：点
+    // 「识别」时焦点转移先关键盘，布局抖动可能吞掉这次点击
     var ratio = vv.height / (window.innerHeight || vv.height);
-    var now = base > 0 && ratio > 0.85 && h < base * 0.75;
-    if (h > base) base = h; // 干净高度（不小于现基线）随时可学；键盘开着的载入学小了，收起即自愈
+    var now = base > 0 && h < base * 0.75
+      && (ratio > 0.85 || (vv.scale || 1) <= scale0 * 1.05);
+    if (h > base) {
+      base = h; // 干净高度（不小于现基线）随时可学；键盘开着的载入学小了，收起即自愈
+      scale0 = vv.scale || scale0 || 1;
+    }
     if (now === open) return;
     open = now;
     document.body.classList.toggle('kb-open', open);
