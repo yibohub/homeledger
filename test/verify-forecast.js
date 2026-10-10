@@ -68,15 +68,15 @@ function addSub(fields) {
   const base = {
     ledger_id: ledgerId, name: '订阅', amount_cents: 1000, currency: 'CNY', cycle: 'monthly', cycle_n: 1,
     anchor_day: null, account_id: null, category_id: null, next_charge_at: '2026-03-15', status: 'active',
-    reminder_days: 3, charge_count: 0, created_at: db.nowStr(),
+    reminder_days: 3, charge_count: 0, auto_renew: 1, created_at: db.nowStr(),
   };
   const v = { ...base, ...fields };
   return Number(db.run(
     `INSERT INTO subscriptions (ledger_id, name, amount_cents, currency, cycle, cycle_n, anchor_day, account_id,
-      category_id, next_charge_at, status, reminder_days, charge_count, created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      category_id, next_charge_at, status, reminder_days, charge_count, auto_renew, created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     v.ledger_id, v.name, v.amount_cents, v.currency, v.cycle, v.cycle_n, v.anchor_day, v.account_id,
-    v.category_id, v.next_charge_at, v.status, v.reminder_days, v.charge_count, v.created_at
+    v.category_id, v.next_charge_at, v.status, v.reminder_days, v.charge_count, v.auto_renew, v.created_at
   ).lastInsertRowid);
 }
 function addRule(fields, payload) {
@@ -131,6 +131,7 @@ addSub({ name: '不周期·仅记录', cycle: 'none', amount_cents: 7000, next_c
 addSub({ name: '已取消', status: 'canceled', amount_cents: 9999, next_charge_at: '2026-03-18' });
 addSub({ name: '已暂停', status: 'paused', amount_cents: 8888, next_charge_at: '2026-03-18' });
 addSub({ name: '下月才扣', amount_cents: 6666, next_charge_at: '2026-04-05' });
+addSub({ name: '仅提醒·不自动扣', auto_renew: 0, amount_cents: 4444, next_charge_at: '2026-03-22' });
 addRule({ name: '周期R1·会扣', auto_post: 1, next_run_at: '2026-03-12' }, [{ type: 'expense', amount_cents: 3000, category_id: c1 }]);
 addRule({ name: '周期R2·手动记', auto_post: 0, next_run_at: '2026-03-14' }, [{ type: 'expense', amount_cents: 9999 }]);
 addRule({ name: '周期R3·收入规则', auto_post: 1, next_run_at: '2026-03-25' }, [{ type: 'income', amount_cents: 7777 }]);

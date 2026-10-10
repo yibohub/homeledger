@@ -200,8 +200,9 @@
 本月预测支出 = 已发生支出 + 未来已知扣费 + 日常节奏外推
   已发生支出   = 本月 1 日至今 type IN ('expense','fee') 的 amount_base_cents 合计
                （与预算预警、首页「本月支出」大数字同一口径，无第二套统计）
-  未来已知扣费 = 订阅扣费：status IN ('active','trial') 且 今天 < next_charge_at ≤ 月末
-                 （金额与 charge() 入账同口径 rate=1；none/fixed 不周期不推进的不计）
+  未来已知扣费 = 订阅扣费：status IN ('active','trial')、auto_renew=1 且今天 < next_charge_at ≤ 月末
+                 （auto_renew=0「仅提醒」与 none/fixed 一样只提醒不扣费；金额与 charge()
+                 入账同口径 rate=1）
                + 周期账单：is_active=1 且 auto_post=1，从 next_run_at 用 advanceDate()
                  逐期 walk 到月末，items 中支出口径的金额合计（income 规则不计）
   日常节奏外推 = 日常日均 × 剩余天数

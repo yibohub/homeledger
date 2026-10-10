@@ -50,7 +50,7 @@ function spentOfMonth(ledgerId, month) {
  * 未来已知扣费（日历精算，今天 < 扣费日 ≤ toDate）
  *
  * 只统计真正会自动入账的部分：
- *   · 订阅：active/trial 且非 none/fixed 周期（这两类到期只提醒不扣费）；
+ *   · 订阅：active/trial、auto_renew=1、非 none/fixed 周期（这三类之外的都只提醒不扣费）；
  *     金额取 amount_cents——与 charge() 入账口径一致（rate=1）
  *   · 周期账单：auto_post=1（auto_post=0 只提醒手动记，可能不记也可能与手动入账双计，
  *     保守不计）；从 next_run_at 逐期 walk 到 toDate，只计今天之后的期次
@@ -63,8 +63,12 @@ function knownFutureCents(o) {
   const { ledger_id: ledgerId, fromDate, toDate, scope, category_id: categoryId, account_id: accountId } = o;
   let cents = 0;
 
+  // 只统计真正会自动入账的部分：
+  //   · 订阅：active/trial 且 auto_renew=1 且非 none/fixed 周期——auto_renew=0（仅提醒，
+  //     P5 一键登记的默认模式）与 none/fixed 一样只提醒不扣费（runDue 同一分支）；
+  //     金额取 amount_cents——与 charge() 入账口径一致（rate=1）
   let sql = `SELECT COALESCE(SUM(amount_cents),0) AS s FROM subscriptions
-             WHERE ledger_id = ? AND status IN ('active','trial')
+             WHERE ledger_id = ? AND status IN ('active','trial') AND auto_renew = 1
                AND cycle NOT IN ('none','fixed') AND next_charge_at > ? AND next_charge_at <= ?`;
   const params = [ledgerId, fromDate, toDate];
   if (scope === 'category' && categoryId) {
