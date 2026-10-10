@@ -549,32 +549,39 @@
         const text = ($('#ai-quick-text') || {}).value || '';
         if (!text.trim()) return toast('请输入内容', 'warn');
         quickBtn.disabled = true;
-        const res = await postJson('/api/ai/text', { text });
-        quickBtn.disabled = false;
-        if (!res.ok) return toast('识别失败：' + res.error, 'error');
-        resultBox.innerHTML = '';
-        if (res.mode === 'answer' || res.mode === 'clarify') {
-          // 问句走查账（P10 阶段 2 后 /api/ai/text 与悬浮球同分流）：直出回答不建草稿；
-          // 警示直接进卡片展示不再 toast，clarify 标注与 m.js 一致
-          let h = '<div class="ai-answer">' + esc(res.text || '').replace(/\n/g, '<br>') + '</div>';
-          h += `<div class="ai-meta"><span>${esc((res.engine === 'llm' ? 'AI 统计' : '规则统计') + (res.mode === 'clarify' ? '（请补充）' : ''))}</span><span>·</span><a href="/reports">看报表 →</a></div>`;
-          if (res.warnings && res.warnings.length) h += `<div class="ai-warn">⚠ ${esc(res.warnings.join('；'))}</div>`;
-          resultBox.innerHTML = h;
-          return;
+        const oldLabel = quickBtn.textContent;
+        quickBtn.textContent = '识别中…';
+        try {
+          const res = await postJson('/api/ai/text', { text });
+          if (!res.ok) return toast('识别失败：' + res.error, 'error');
+          resultBox.innerHTML = '';
+          if (res.mode === 'answer' || res.mode === 'clarify') {
+            // 问句走查账（P10 阶段 2 后 /api/ai/text 与悬浮球同分流）：直出回答不建草稿；
+            // 警示直接进卡片展示不再 toast，clarify 标注与 m.js 一致
+            let h = '<div class="ai-answer">' + esc(res.text || '').replace(/\n/g, '<br>') + '</div>';
+            h += `<div class="ai-meta"><span>${esc((res.engine === 'llm' ? 'AI 统计' : '规则统计') + (res.mode === 'clarify' ? '（请补充）' : ''))}</span><span>·</span><a href="/reports">看报表 →</a></div>`;
+            if (res.warnings && res.warnings.length) h += `<div class="ai-warn">⚠ ${esc(res.warnings.join('；'))}</div>`;
+            resultBox.innerHTML = h;
+            return;
+          }
+          (res.warnings || []).forEach((w) => toast(w, 'warn'));
+          if (!res.items.length) return toast('没能识别出金额，请换个说法，例如「午饭 35 元 支付宝」', 'warn');
+          const single = res.items[0];
+          const url = '/transactions/new?type=' + encodeURIComponent(single.type) +
+            '&amount=' + encodeURIComponent((single.amount_cents / 100).toFixed(2)) +
+            '&date=' + encodeURIComponent(single.txn_date) +
+            (single.category_id ? '&category_id=' + encodeURIComponent(single.category_id) : '') +
+            (single.account_id ? '&account_id=' + encodeURIComponent(single.account_id) : '') +
+            '&note=' + encodeURIComponent(single.note || single.merchant || '') + '&from_ai=1';
+          if (res.items.length === 1) { window.location.href = url; return; }
+          // 多笔：走草稿确认
+          lastScanIds = [];
+          renderDrafts({ items: res.items, engine: res.engine, warnings: res.warnings || [] });
+        } finally {
+          // finally 复原：postJson 网络层异常会抛出，缺这层断网时按钮会永久禁用
+          quickBtn.disabled = false;
+          quickBtn.textContent = oldLabel;
         }
-        (res.warnings || []).forEach((w) => toast(w, 'warn'));
-        if (!res.items.length) return toast('没能识别出金额，请换个说法，例如「午饭 35 元 支付宝」', 'warn');
-        const single = res.items[0];
-        const url = '/transactions/new?type=' + encodeURIComponent(single.type) +
-          '&amount=' + encodeURIComponent((single.amount_cents / 100).toFixed(2)) +
-          '&date=' + encodeURIComponent(single.txn_date) +
-          (single.category_id ? '&category_id=' + single.category_id : '') +
-          (single.account_id ? '&account_id=' + single.account_id : '') +
-          '&note=' + encodeURIComponent(single.note || single.merchant || '') + '&from_ai=1';
-        if (res.items.length === 1) { window.location.href = url; return; }
-        // 多笔：走草稿确认
-        lastScanIds = [];
-        renderDrafts({ items: res.items, engine: res.engine, warnings: res.warnings || [] });
       });
     }
 
