@@ -9,28 +9,42 @@
 
 /* --------------------------- 软键盘适配（底栏避让） --------------------------- */
 (function () {
+  // 仅触屏设备：桌面显式开极简（hl_simple=1）时拖窗口/开 DevTools 的高度骤变不参与
+  var mq = window.matchMedia;
+  if (!mq || !mq('(pointer: coarse)').matches || !window.visualViewport) return;
   var vv = window.visualViewport;
-  if (!vv) return;
-  var base = 0; // 键盘收起时的可视全高基线（只向上更新，旋转后重置重学）
+  var base = 0; // 键盘收起时的可视全高基线（只向上更新；旋转后重置重学）
   var open = false;
-  function check() {
+  var pend = 0; // 高度稳定去抖句柄
+
+  function apply() {
     if (vv.height > base) base = vv.height;
-    // 缩掉 >25% 视为键盘弹出；排除捏合缩放（scale 变大），地址栏收展只有 ~8% 不误触。
-    // 不绑 focus/blur：点「识别」时焦点转移会先关键盘，布局抖动可能吞掉这次点击
+    // 缩掉 >25% 视为键盘弹出；scale>1.01 的捏合缩放排除（放大态下键盘判定失效是已知接受面，
+    // 精确区分需 VirtualKeyboard API，需要时再上）；地址栏收展只有 ~8% 不误触。
+    // 不绑 focus/blur：点「识别」时焦点转移先关键盘，布局抖动可能吞掉这次点击
     var now = base > 0 && (!vv.scale || vv.scale <= 1.01) && vv.height < base * 0.75;
     if (now === open) return;
     open = now;
     document.body.classList.toggle('kb-open', open);
     if (open) {
-      // 等键盘动画收尾再把捕获区居中——露出输入框和整行按钮，不用先收键盘
+      // 高度已稳定（去抖）再居中捕获区——输入框和整行按钮都露出，不用先收键盘
       var el = document.activeElement;
       var cap = el && el.closest && el.closest('.m-capture');
-      if (cap) setTimeout(function () { cap.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 250);
+      if (cap) cap.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
   }
-  vv.addEventListener('resize', check);
-  window.addEventListener('orientationchange', function () { base = 0; setTimeout(check, 300); });
-  check();
+  // 键盘弹出/收起与旋转都会连续触发 resize：等高度稳定 250ms 再判定，
+  // 否则旋转动画的中间高度/旧方向高度会被学进基线，把 kb-open 误锁一整个横屏会话（评审 P2）
+  vv.addEventListener('resize', function () {
+    if (pend) clearTimeout(pend);
+    pend = setTimeout(function () { pend = 0; apply(); }, 250);
+  });
+  // 旋转：基线换方向重学（matchMedia 事件替代已废弃的 orientationchange）
+  var omq = mq('(orientation: portrait)');
+  var onTurn = function () { base = 0; };
+  if (omq.addEventListener) omq.addEventListener('change', onTurn);
+  else if (omq.addListener) omq.addListener(onTurn);
+  apply(); // 初次：学基线，键盘必然未开
 })();
 
 /* ------------------------------ Tab1 捕获区 ------------------------------ */

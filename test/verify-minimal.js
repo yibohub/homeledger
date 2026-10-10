@@ -122,7 +122,8 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   check('m.js 语音同样要求安全上下文（HTTP 下不亮按钮）', js.status === 200 && js.text.includes('window.isSecureContext'), '');
   check('m.js 软键盘适配：VisualViewport 判键盘 + kb-open 藏底栏，且先于捕获区守卫（全极简页面生效）',
     js.status === 200 && js.text.includes('visualViewport') && js.text.includes('kb-open')
-      && js.text.indexOf('visualViewport') < js.text.indexOf("getElementById('mCapture')"), '');
+      && js.text.indexOf("vv.addEventListener('resize'") > -1
+      && js.text.indexOf("vv.addEventListener('resize'") < js.text.indexOf("getElementById('mCapture')"), '');
   check('m.js 问句分支渲染回答卡（answer/clarify）', js.status === 200 && js.text.includes("data.mode === 'answer'") && js.text.includes('m-answer'), '');
   check('m.js 拍单按钮判空（只读视图无 mCam 不报错）', js.status === 200 && js.text.includes('if (camBtn)'), '');
   check('m.js 账户一律下拉可改（推荐预选 + 「可改」提示，维护者反馈修复）', js.status === 200 && js.text.includes('m-draft-acc-row') && js.text.includes('按习惯推荐，可改'), '');
