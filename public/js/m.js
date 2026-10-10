@@ -1,10 +1,39 @@
 /* ============================================================
-   家账簿 · 手机极简模式（P10）—— Tab1 捕获区
-   悬浮球的全屏形态：语音 / 拍账单 / 文字 → 草稿卡片 → 确认入库；
-   问句自动转查账（阶段 2）→ 回答卡片。只读成员只有问账（无拍单按钮）。
-   依赖 layout-m.ejs 的 #mCapture 结构与 meta[name=csrf]。
+   家账簿 · 手机极简模式（P10）—— 布局适配 + Tab1 捕获区
+   ① 软键盘适配（所有极简页面）：键盘弹出会把固定底栏顶到输入区上方，
+      盖住捕获区的输入框/识别按钮——键盘打开时隐藏底栏，收起自动恢复
+   ② 捕获区：语音 / 拍账单 / 文字 → 草稿卡片 → 确认入库；
+      问句自动转查账（阶段 2）→ 回答卡片。只读成员只有问账（无拍单按钮）
    ============================================================ */
 'use strict';
+
+/* --------------------------- 软键盘适配（底栏避让） --------------------------- */
+(function () {
+  var vv = window.visualViewport;
+  if (!vv) return;
+  var base = 0; // 键盘收起时的可视全高基线（只向上更新，旋转后重置重学）
+  var open = false;
+  function check() {
+    if (vv.height > base) base = vv.height;
+    // 缩掉 >25% 视为键盘弹出；排除捏合缩放（scale 变大），地址栏收展只有 ~8% 不误触。
+    // 不绑 focus/blur：点「识别」时焦点转移会先关键盘，布局抖动可能吞掉这次点击
+    var now = base > 0 && (!vv.scale || vv.scale <= 1.01) && vv.height < base * 0.75;
+    if (now === open) return;
+    open = now;
+    document.body.classList.toggle('kb-open', open);
+    if (open) {
+      // 等键盘动画收尾再把捕获区居中——露出输入框和整行按钮，不用先收键盘
+      var el = document.activeElement;
+      var cap = el && el.closest && el.closest('.m-capture');
+      if (cap) setTimeout(function () { cap.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 250);
+    }
+  }
+  vv.addEventListener('resize', check);
+  window.addEventListener('orientationchange', function () { base = 0; setTimeout(check, 300); });
+  check();
+})();
+
+/* ------------------------------ Tab1 捕获区 ------------------------------ */
 (function () {
   const cap = document.getElementById('mCapture');
   if (!cap) return;
