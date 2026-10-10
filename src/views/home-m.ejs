@@ -35,7 +35,7 @@
        问句自动转查账（P10 阶段 2），只读成员也可问（拍单按钮按可写权限显示） -->
   <section class="m-card m-capture" id="mCapture">
     <div class="m-capture-input">
-      <textarea id="mText" rows="1" placeholder="<%= canWrite(ledger.role) ? '记一句「午饭 35 元」，或问「这个月花了多少」' : '问一句账：这个月餐饮花了多少' %>" inputmode="text"></textarea>
+      <textarea id="mText" rows="2" placeholder="<%= canWrite(ledger.role) ? '记一句「午饭 35 元」，或问「这个月花了多少」' : '问一句账：这个月餐饮花了多少' %>" inputmode="text"></textarea>
       <div class="m-capture-actions">
         <button id="mMic" class="m-capture-btn" type="button" title="语音输入" aria-label="语音输入" hidden><svg class="icon"><use href="#i-mic"></use></svg><span>语音</span></button>
         <% if (canWrite(ledger.role)) { %>
