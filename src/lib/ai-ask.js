@@ -216,65 +216,66 @@ function matchMember(text, ctx) {
   return ctx.members.find((m) => m && s.includes(m)) || null;
 }
 
-/** 从文本解析时间范围（规则版），未识别返回 undefined 交由缺省（本月） */
+/**
+ * 从文本解析时间范围（规则版），未识别返回 undefined 交由缺省（本月）。
+ * 候选表 + 位置仲裁：句中位置最早者胜，同位重叠取更长（更具体）的匹配——
+ * 「这个月到今天」仍是本月、「今天比昨天」主语取今天（compare 句天然取「比」前的时间词）。
+ * 相对日期单日问法（维护者实测：问「前天」模型曾曲解成最近 2 天，问的那天反而不在窗口内）
+ * 走同一张表，日期由代码推算；模型只在提示词里拿预推结果抄写，不自己算日期。
+ */
 function parseRangeByRules(text, today) {
   const s = String(text || '');
   const thisMonth = today.slice(0, 7);
   const year = Number(thisMonth.slice(0, 4));
-  let m;
-  if ((m = s.match(/(?:近|最近)\s*(\d{1,2}|[一两二三四五六七八九十]+)\s*个?月/))) {
-    const n = parseCnNumber(m[1]);
-    if (n) return { kind: 'months', months: n };
-  }
-  if ((m = s.match(/(?:近|最近)\s*(\d{1,3})\s*天/))) return { kind: 'days', days: Number(m[1]) };
-  // 相对日期单日问法（维护者实测：问「前天」模型曾曲解成最近 2 天，问的那天反而不在窗口内）。
-  // 大前天要先于前天判（子串包含）；N天前兜住「3天前/三天前」这类带数字的变体
-  if (/大前天/.test(s)) return singleDayRange(today, 3, '大前天');
-  if (/前天/.test(s)) return singleDayRange(today, 2, '前天');
-  if (/昨天|昨日/.test(s)) return singleDayRange(today, 1, '昨天');
-  if (/今天|今日/.test(s)) return singleDayRange(today, 0, '今天');
-  if ((m = s.match(/(\d{1,3}|[一两二三四五六七八九十]+)\s*天前/))) {
-    const n = parseCnNumber(m[1]);
-    if (n) return singleDayRange(today, n, `${n}天前`);
-  }
-  if (/上上个月/.test(s)) return { kind: 'month', month: shiftMonth(thisMonth, -2) };
-  // 「这个月」要先于「上个月」判：「这个月比上个月多花多少」主语是本月，
-  // 文本里两个词都会出现，按先出现谁就归谁会错挂到上月
-  if (/这(个)?月|本(个)?月/.test(s)) return { kind: 'month', month: thisMonth };
-  if (/上(个)?月|上一月/.test(s)) return { kind: 'month', month: shiftMonth(thisMonth, -1) };
-  // 显式年月要先于裸月份判：「2025年12月」若走 (\d{1,2})月 会丢掉年份、错算成今年 12 月
-  if ((m = s.match(/((?:19|20)\d{2})\s*[-/.年]?\s*(\d{1,2})\s*月/))) {
-    const y = Number(m[1]);
-    const mm = Number(m[2]);
-    if (mm >= 1 && mm <= 12) return { kind: 'month', month: `${y}-${pad(mm)}` };
-  }
-  if ((m = s.match(/(去年|今年)?(\d{1,2})月/))) {
-    const y = m[1] === '去年' ? year - 1 : year;
-    const mm = Number(m[2]);
-    if (mm >= 1 && mm <= 12) return { kind: 'month', month: `${y}-${pad(mm)}` };
-  }
-  if (/这(个)?季度|本季度/.test(s)) {
-    const startMonth = quarterStartMonth(year, quarterOfMonth(thisMonth));
+  const quarterRange = (y, q) => {
+    const startMonth = quarterStartMonth(y, q);
     return {
       kind: 'between', from: monthStart(startMonth), to: monthEnd(shiftMonth(startMonth, 2)),
       prevFrom: monthStart(shiftMonth(startMonth, -3)), prevTo: monthEnd(shiftMonth(startMonth, -1)),
     };
-  }
-  if (/上(个)?季度/.test(s)) {
-    const yq = quarterOfMonth(thisMonth) === 1
-      ? { y: year - 1, q: 4 }
-      : { y: year, q: quarterOfMonth(thisMonth) - 1 };
-    const startMonth = quarterStartMonth(yq.y, yq.q);
-    return {
-      kind: 'between', from: monthStart(startMonth), to: monthEnd(shiftMonth(startMonth, 2)),
-      prevFrom: monthStart(shiftMonth(startMonth, -3)), prevTo: monthEnd(shiftMonth(startMonth, -1)),
-    };
-  }
-  if (/去年/.test(s)) return { kind: 'year', year: year - 1 };
-  if (/今年|年度|全年/.test(s)) return { kind: 'year', year };
-  if ((m = s.match(/(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})[日号]?/))) {
-    // 带具体日期：以该日所在月处理（首版口径）
-    return { kind: 'month', month: `${m[1]}-${pad(Number(m[2]))}` };
+  };
+  const cands = [];
+  const push = (re, make) => {
+    const m = re.exec(s);
+    if (m) cands.push({ index: m.index, len: m[0].length, m, make });
+  };
+  push(/(?:近|最近)\s*(\d{1,2}|[一两二三四五六七八九十]+)\s*个?月/, (m) => {
+    const n = parseCnNumber(m[1]);
+    return n ? { kind: 'months', months: n } : null;
+  });
+  push(/(?:近|最近)\s*(\d{1,3})\s*天/, (m) => ({ kind: 'days', days: Number(m[1]) }));
+  push(/大前天/, () => singleDayRange(today, 3, '大前天')); // 先于前天判：子串包含，同位时 len 仲裁也会选它
+  push(/前天/, () => singleDayRange(today, 2, '前天'));
+  push(/昨天|昨日/, () => singleDayRange(today, 1, '昨天'));
+  push(/今天|今日/, () => singleDayRange(today, 0, '今天'));
+  // (?<!\d) 拒绝「1234天前」从中间吞位成 234 天（宁缺毋错：位数超限交缺省）
+  push(/(?<!\d)(\d{1,3}|[一两二三四五六七八九十]+)\s*天前/, (m) => {
+    const n = parseCnNumber(m[1]);
+    return n ? singleDayRange(today, n, `${n}天前`) : null;
+  });
+  push(/上上个月/, () => ({ kind: 'month', month: shiftMonth(thisMonth, -2) }));
+  push(/这(个)?月|本(个)?月/, () => ({ kind: 'month', month: thisMonth }));
+  push(/上(个)?月|上一月/, () => ({ kind: 'month', month: shiftMonth(thisMonth, -1) }));
+  push(/((?:19|20)\d{2})\s*[-/.年]?\s*(\d{1,2})\s*月/, (m) => {
+    const mm = Number(m[2]);
+    return mm >= 1 && mm <= 12 ? { kind: 'month', month: `${m[1]}-${pad(mm)}` } : null;
+  });
+  push(/(去年|今年)?(\d{1,2})月/, (m) => {
+    const mm = Number(m[2]);
+    return mm >= 1 && mm <= 12 ? { kind: 'month', month: `${m[1] === '去年' ? year - 1 : year}-${pad(mm)}` } : null;
+  });
+  push(/这(个)?季度|本季度/, () => quarterRange(year, quarterOfMonth(thisMonth)));
+  push(/上(个)?季度/, () => {
+    const yq = quarterOfMonth(thisMonth) === 1 ? { y: year - 1, q: 4 } : { y: year, q: quarterOfMonth(thisMonth) - 1 };
+    return quarterRange(yq.y, yq.q);
+  });
+  push(/去年/, () => ({ kind: 'year', year: year - 1 }));
+  push(/今年|年度|全年/, () => ({ kind: 'year', year }));
+  push(/(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})[日号]?/, (m) => ({ kind: 'month', month: `${m[1]}-${pad(Number(m[2]))}` }));
+  cands.sort((a, b) => a.index - b.index || b.len - a.len);
+  for (const c of cands) {
+    const r = c.make(c.m);
+    if (r) return r;
   }
   return undefined;
 }
@@ -373,7 +374,9 @@ intent 为 query 时给出 query 结构：
 function buildAskUserPrompt(text, ctx, today) {
   return [
     `今天是 ${today}。`,
-    // 相对日期预推好给模型抄写：模型自己做「今天减 2」这类日期运算不可靠（数字靠统计、日期靠代码）
+    // 相对日期预推好给模型抄写：模型自己做「今天减 2」这类日期运算不可靠（数字靠统计、日期靠代码）。
+    // 只预推固定四档——「N天前」的 N 由规则层兜底；十五天前这类长中文数词规则层也接不住，
+    // 落回本月缺省（答不到但不会答错），不给模型自行推算日期的口子
     `相对日期对照：今天=${today}、昨天=${shiftDay(today, 1)}、前天=${shiftDay(today, 2)}、大前天=${shiftDay(today, 3)}`,
     `支出分类路径：${ctx.expensePaths.join('、')}`,
     `收入分类路径：${ctx.incomePaths.join('、')}`,

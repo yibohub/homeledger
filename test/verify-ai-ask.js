@@ -104,6 +104,16 @@ for (const [t, off, label] of [['前天花了多少钱', -2, '前天'], ['大前
 }
 r = ruleOf('前天花了多少钱');
 check('前天问法 → 总计汇总且范围即前天单日', r && r.query.type === 'category_summary' && r.query.range?.kind === 'between' && r.query.range.from === shiftDate(today, -2), JSON.stringify(r?.query?.range));
+/* P2 审查回归：时间词按句中位置仲裁，相对日不抢更早的时间词、比较句主语取「比」前 */
+let rr2 = aiAsk.parseRangeByRules('这个月到今天花了多少', today);
+check('「这个月到今天」仍答本月（相对日不抢更早时间词，不回归成单日）', rr2 && rr2.kind === 'month' && rr2.month === thisMonth, JSON.stringify(rr2));
+rr2 = aiAsk.parseRangeByRules('上个月到今天花了多少', today);
+check('「上个月到今天」仍答上月', rr2 && rr2.kind === 'month' && rr2.month === lastMonthYYYYMM, JSON.stringify(rr2));
+rr2 = aiAsk.parseRangeByRules('今天比昨天多花多少', today);
+check('「今天比昨天」主语取今天（compare 句取「比」前时间词）', rr2 && rr2.kind === 'between' && rr2.from === today && rr2.day_label === '今天', JSON.stringify(rr2));
+rr2 = aiAsk.parseRangeByRules('前天比大前天多花多少', today);
+check('「前天比大前天」主语取前天', rr2 && rr2.day_label === '前天', JSON.stringify(rr2));
+check('「1234天前」位数超限不吞位解析（宁缺毋错交缺省）', aiAsk.parseRangeByRules('1234天前花了多少', today) === undefined);
 
 console.log('\n=== A3. 时间范围与「上一期」（compare 的数字正确性靠它）===\n');
 
@@ -119,8 +129,10 @@ rg = aiAsk.resolveRange({ kind: 'days', days: 7 }, today);
 check('最近 7 天：起点=今天-6', rg.start === shiftDate(today, -6) && rg.end === today, `${rg.start} ~ ${rg.end}`);
 rg = aiAsk.resolveRange(aiAsk.parseRangeByRules('前天花了多少', today), today);
 const d2 = shiftDate(today, -2);
+// 跨年稳健：前天落在上一年时 label 带年份前缀（1月1/2日跑也不假红）
+const d2Label = `${d2.slice(0, 4) === today.slice(0, 4) ? '' : d2.slice(0, 4) + '年'}${Number(d2.slice(5, 7))}月${Number(d2.slice(8, 10))}日（前天）`;
 check('单日范围 label 人话化（「10月8日（前天）」式，跨年补年份）', rg.start === d2 && rg.end === d2
-  && rg.label === `${Number(d2.slice(5, 7))}月${Number(d2.slice(8, 10))}日（前天）`, rg.label);
+  && rg.label === d2Label, rg.label);
 check('单日的上一期 = 前一天（等长回退，compare 可直接用）', rg.prev.start === shiftDate(today, -3) && rg.prev.end === rg.prev.start, `${rg.prev.start} ~ ${rg.prev.end}`);
 
 /* 审查修复回归：显式年月不再丢年份、近 N 月上一期与本期等长 */
