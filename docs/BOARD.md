@@ -83,7 +83,7 @@
 | 国产浏览器语音兜底（服务端转写） | Web Speech 识别依赖浏览器厂商云服务：华为鸿蒙浏览器 API 存在但无后端（三层权限全开仍 not-allowed，2026-10-10 实测确诊）；维护者确认其设备网页录音 getUserMedia 可用（vivitage 项目在用），方案技术可行。**2026-10-10 维护者决定暂不做，用输入法听写** | 维护者改主意要点话筒时：getUserMedia+MediaRecorder 录音 → 已配 OpenAI 兼容接口 /audio/transcriptions 转写 | 2026-10-10 华为手机实测 |
 | 麦克风按钮去留 | 华为手机（主力设备）浏览器点话筒必败（无识别后端），按钮在该设备形同虚设但报错有键盘听写引导；iPhone Safari / 桌面 Chrome/Edge 可正常用 | 维护者测过其他手机后决定：留=维持现状（不可用环境点按钮得到对症提示）；去=移除语音入口 | 2026-10-10 维护者决策 |
 | txn.pickAccount 补拦已归档账户 | 现只校验账本不校验 is_archived：页面陈旧（mAccounts 快照含后来归档的账户）时选中归档账户确认会静默入库（PR #15 审查发现的 main 既有缺口，习惯引擎本身已排除归档，新 UI 路径实际触不到） | 下次动 txn.js 或做账户归档相关功能时顺手（一行 `AND is_archived = 0` + verify-transactions 断言） | 2026-10-10 PR #15 审查 |
-| 删除 public/kb-diag.html 诊断页 | 华为手机键盘避让排查的临时工具（/static/kb-diag.html 无鉴权但无业务数据）；结论落定后失去价值 | 维护者确认真机避让正常后，下次批次顺手删除；OEM 内核事件丢失坑随结论记入 solutions | 2026-10-10 PR #19 |
+| ~~删除 public/kb-diag.html 诊断页~~ → 改为保留 | 维护者确认真机避让正常，并认可「诊断页 + 调试浮窗」的调试方法，要求沉淀为经验 → 保留为常驻诊断设施（/static/kb-diag.html + m.js kb_debug 浮窗，localStorage 关着零开销）；方法论已沉淀 [solutions/device-debug-chip.md](solutions/device-debug-chip.md) | 无（已定案保留）；排查视口/键盘外的真机问题时照该模式另起一份 | 2026-10-10 PR #19 登记 / 同日维护者定案保留 |
 | 账户编辑表单暴露「排序值」输入框 | 后端 `POST /accounts/:id` 已收 `sort_order`，纯前端字段；当时讨论完默认账户问题即转向 AI 话题 | 下次做账户页相关功能时顺手；或维护者再提「改默认账户」时 | 2026-10-09 默认账户讨论 |
 | CI 增加 windows-latest 一条腿 | CI 时长成本；两个 Windows-only 坑已修复且有 [防回归文档](solutions/windows-test-infra.md) | 下次再出现 Windows-only 测试问题时 | 2026-10-09 v1.8.0 批次 |
 

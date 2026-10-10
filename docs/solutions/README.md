@@ -9,3 +9,4 @@
 | 路由遮蔽 | 参数路由 `/:id` 注册在前，`/transactions/bulk` 被吞进编辑分支，网页批量操作自 v1.0.0 全失效；核心写路径必须有 HTTP 层测试 | [route-shadowing.md](route-shadowing.md) | 2026-10-09（verify-transactions 套件首跑） |
 | NAS 部署运维 | 语音 not-allowed 的根因是 HTTP 非安全上下文（DSM 反代 + 自签证书方案）；发版到 NAS 标准路径 | [deploy-nas.md](deploy-nas.md) | 2026-10-09（v1.10.0 部署实测） |
 | 云服务器部署运维 | 目标机连 GitHub 被 GnuTLS 掐断 → git bundle 分发；容器只绑 127.0.0.1、公网走 Caddy 子域反代；升级 = 部署机 `update.sh` | [deploy-caddy-docker.md](deploy-caddy-docker.md) | 2026-10-09（首次部署实测） |
+| 真机前端调试 | 只在真机异常的问题：诊断页（实时数值+事件日志）+ localStorage 门控调试浮窗（跨页面跟随），让设备自己交出证据；工具已常驻（/static/kb-diag.html + m.js kb_debug） | [device-debug-chip.md](device-debug-chip.md) | 2026-10-10（键盘避让 ArkWeb 排查） |
