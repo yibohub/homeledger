@@ -237,7 +237,7 @@
       for (const a of options) {
         const o = document.createElement('option');
         o.value = a.id;
-        o.textContent = (a.icon || '') + ' ' + a.name;
+        o.textContent = (a.icon ? a.icon + ' ' : '') + a.name;
         if (it.account_id && Number(a.id) === Number(it.account_id)) o.selected = true;
         accountSel.appendChild(o);
       }
