@@ -97,6 +97,14 @@ check('像问句但解析不出 → null（上层反问）', r === null);
 r = ruleOf('这个月花了多少');
 check('无分类无商户 → 总计汇总', r && r.query.type === 'category_summary' && r.query.category === null);
 
+/* 相对日期单日问法（维护者实测：问「前天」模型曾曲解成最近 2 天，问的那天反而不在窗口内） */
+for (const [t, off, label] of [['前天花了多少钱', -2, '前天'], ['大前天花了多少', -3, '大前天'], ['昨天支出多少', -1, '昨天'], ['今日收入多少', 0, '今天'], ['3天前花了多少', -3, '3天前'], ['三天前花了多少', -3, '3天前']]) {
+  const rr = aiAsk.parseRangeByRules(t, today);
+  check(`相对日期解析：${t} → 单日`, rr && rr.kind === 'between' && rr.from === shiftDate(today, off) && rr.to === rr.from && rr.day_label === label, JSON.stringify(rr));
+}
+r = ruleOf('前天花了多少钱');
+check('前天问法 → 总计汇总且范围即前天单日', r && r.query.type === 'category_summary' && r.query.range?.kind === 'between' && r.query.range.from === shiftDate(today, -2), JSON.stringify(r?.query?.range));
+
 console.log('\n=== A3. 时间范围与「上一期」（compare 的数字正确性靠它）===\n');
 
 let rg = aiAsk.resolveRange({ kind: 'month', month: thisMonth }, today);
@@ -109,6 +117,11 @@ check('近三个月起点 = 前推 2 个月的 1 日', rg.start === expectStart,
 check('近三月的上一期 = 再往前 3 个自然月', rg.prev.start === monthOfShift(thisMonth, -5) + '-01', `${rg.prev.start} ~ ${rg.prev.end}`);
 rg = aiAsk.resolveRange({ kind: 'days', days: 7 }, today);
 check('最近 7 天：起点=今天-6', rg.start === shiftDate(today, -6) && rg.end === today, `${rg.start} ~ ${rg.end}`);
+rg = aiAsk.resolveRange(aiAsk.parseRangeByRules('前天花了多少', today), today);
+const d2 = shiftDate(today, -2);
+check('单日范围 label 人话化（「10月8日（前天）」式，跨年补年份）', rg.start === d2 && rg.end === d2
+  && rg.label === `${Number(d2.slice(5, 7))}月${Number(d2.slice(8, 10))}日（前天）`, rg.label);
+check('单日的上一期 = 前一天（等长回退，compare 可直接用）', rg.prev.start === shiftDate(today, -3) && rg.prev.end === rg.prev.start, `${rg.prev.start} ~ ${rg.prev.end}`);
 
 /* 审查修复回归：显式年月不再丢年份、近 N 月上一期与本期等长 */
 const ym = aiAsk.parseRangeByRules('2025年12月花了多少', today);
@@ -139,6 +152,29 @@ check('模型分类名回查为真实路径', nq.category?.name === '餐饮/午�
 nq = aiAsk.normalizeModelQuery({ type: 'merchant', range: { kind: 'month' }, member: '不存在的人' }, CTX, ledgerId, today);
 check('不在成员列表的 member 被丢弃', nq && !nq.member);
 
+console.log('\n=== A4b. 规则显式参数优先合并（模型只补缺）===\n');
+
+let mg = aiAsk.mergeRuleParams(
+  { type: 'category_summary', range: { kind: 'between', from: '2026-10-08', to: '2026-10-08', day_label: '前天' } },
+  { type: 'category_summary', metric: 'expense', range: { kind: 'days', days: 2 } });
+check('规则显式 range 优先（「前天」不被模型 days:2 覆盖）', mg.range.kind === 'between' && mg.range.day_label === '前天', JSON.stringify(mg.range));
+mg = aiAsk.mergeRuleParams({ type: 'trend', trend_months: 3 }, { type: 'trend', trend_months: 6 });
+check('显式 trend_months=3 不被模型缺省 6 覆盖（近三月趋势曾答六个月）', mg.trend_months === 3, JSON.stringify(mg));
+mg = aiAsk.mergeRuleParams({ type: 'top', top_n: 5 }, { type: 'top' });
+check('显式 top_n=5 不被模型缺省覆盖', mg.top_n === 5);
+mg = aiAsk.mergeRuleParams({ type: 'trend' }, { type: 'trend', trend_months: 12 });
+check('规则没解析出 → 模型值保留', mg.trend_months === 12);
+mg = aiAsk.mergeRuleParams(
+  { type: 'merchant', range: { kind: 'days', days: 90 }, range_from_default: true },
+  { type: 'merchant', range: { kind: 'month', month: '2026-10' } });
+check('规则缺省窗口不算显式 → 模型 range 保留', mg.range.kind === 'month', JSON.stringify(mg.range));
+r = ruleOf('支出趋势');
+check('趋势无显式月数不再预填缺省（runQuery 兜底 6）', r && r.query.type === 'trend' && r.query.trend_months === undefined, JSON.stringify(r?.query));
+r = ruleOf('钱都花哪了');
+check('排行无显式 N 不再预填缺省 top_n', r && r.query.type === 'top' && r.query.top_n === undefined);
+r = ruleOf('多花了多少');
+check('对比无时间词不再预填缺省 range', r && r.query.type === 'compare' && r.query.range === undefined);
+
 console.log('\n=== A5. trend 出数 + 模板叙述（进程内真实库）===\n');
 
 const accId = Number(db.get('SELECT id FROM accounts WHERE ledger_id = ? ORDER BY id LIMIT 1', ledgerId).id);
@@ -168,6 +204,14 @@ txn.createTransaction(ledgerId, uid, { type: 'transfer', amount_cents: 10000, ac
 const memberTop = aiAsk.runQuery(ledgerId, { type: 'top', metric: 'expense', by: 'member', top_n: 3 }, aiAsk.resolveRange({ kind: 'month', month: thisMonth }, today), today);
 check('成员榜：金额 35 元且笔数只计收支（转账不算）', memberTop.rows.length === 1 && memberTop.rows[0].total === 3500 && memberTop.rows[0].count === 1,
   JSON.stringify(memberTop.rows));
+const trendDefault = aiAsk.runQuery(ledgerId, { type: 'trend', metric: 'expense' }, aiAsk.resolveRange({ kind: 'months', months: 6 }, today), today);
+check('trend 缺省 6 个月（显式参数下放 runQuery 兜底后行为不变）', trendDefault.series.length === 6, `months=${trendDefault.series.length}`);
+
+/* 模板叠词回归：无分类时「全部支出」不再拼成「全部支出支出」（维护者实测答复原文） */
+const sumTpl = aiAsk.narrateTemplate({ type: 'category_summary', metric: 'expense', label: '最近 2 天', category: null, total: 505620, count: 8, whole_total: 505620, share: 1, top_merchant: null });
+check('汇总模板无分类不叠词（「全部支出 ¥5,056.20」）', sumTpl.includes('全部支出 ¥5,056.20') && !sumTpl.includes('支出支出'), sumTpl);
+const sumTpl2 = aiAsk.narrateTemplate({ type: 'category_summary', metric: 'expense', label: '2026年10月', category: '餐饮', total: 3500, count: 1, whole_total: 346050, share: 0.01, top_merchant: null });
+check('汇总模板有分类文案不变（「餐饮支出 ¥35.00」）', sumTpl2.startsWith('2026年10月餐饮支出 ¥35.00'), sumTpl2);
 
 console.log('\n=== A6. 叙述数字核验（模型漏关键金额 → 退回模板）===\n');
 
@@ -332,6 +376,13 @@ const noComma = (s) => String(s).replace(/,/g, '');
   /* --- 查询分支：对比 --- */
   r = await req('POST', '/api/ai/chat', { json: { text: '这个月比上个月多花多少' } });
   check('对比：本月合计与上月基数都出现', r.json.mode === 'answer' && noComma(r.json.text).includes('3460.50') && noComma(r.json.text).includes('50.00'), r.json.text);
+
+  /* --- 查询分支：相对日期（前天；打车类目不碰后续餐饮口径断言）--- */
+  r = await req('POST', '/api/ai/chat', { json: { text: `${shiftDate(today, -2)} 打车 33 元` } });
+  check('造数入账：前天一笔 33 元', r.status === 200 && r.json.mode === 'record' && r.json.created === 1, `HTTP ${r.status} mode=${r.json && r.json.mode}`);
+  r = await req('POST', '/api/ai/chat', { json: { text: '前天花了多少钱' } });
+  check('问「前天」答前天单日（人话 label，非最近2天/本月）', r.json.mode === 'answer' && r.json.data
+    && r.json.data.label.includes('（前天）') && noComma(r.json.text).includes('33.00') && !r.json.text.includes('最近'), r.json.text);
 
   /* --- 查询分支：预算 --- */
   r = await req('GET', '/budgets');
