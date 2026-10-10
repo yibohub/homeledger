@@ -217,25 +217,43 @@
     ].filter(Boolean).join(' · ');
     card.appendChild(sub);
 
-    // 草稿没带账户（规则引擎常见）→ 账户下拉默认第一项，绝不能让「确认入库」卡死
+    // 账户一律用下拉（可改）：默认选中习惯推荐/识别出的账户，没有则第一项——
+    // 只读地显示「（按习惯推荐）」而不给名字与改法，用户没法判断该不该确认（维护者反馈）
+    const accs = (() => { try { return JSON.parse((document.getElementById('mAccounts') || {}).textContent || '[]'); } catch { return []; } })();
     let accountSel = null;
-    if (!it.account_id) {
-      const accs = (() => { try { return JSON.parse((document.getElementById('mAccounts') || {}).textContent || '[]'); } catch { return []; } })();
-      if (accs.length) {
-        accountSel = document.createElement('select');
-        accountSel.className = 'm-draft-acc';
-        for (const a of accs) {
-          const o = document.createElement('option');
-          o.value = a.id;
-          o.textContent = (a.icon || '') + ' ' + a.name;
-          accountSel.appendChild(o);
-        }
-        card.appendChild(accountSel);
+    if (accs.length) {
+      const accRow = document.createElement('div');
+      accRow.className = 'm-draft-acc-row';
+      const label = document.createElement('span');
+      label.textContent = '账户';
+      accRow.appendChild(label);
+      accountSel = document.createElement('select');
+      accountSel.className = 'm-draft-acc';
+      // 推荐的账户不在可选清单（如已归档）时补一个原生选项，推荐值不被静默换掉
+      const options = accs.slice();
+      if (it.account_id && !options.some((a) => Number(a.id) === Number(it.account_id))) {
+        options.unshift({ id: it.account_id, name: it.account_name_resolved || '账户 #' + it.account_id });
       }
+      for (const a of options) {
+        const o = document.createElement('option');
+        o.value = a.id;
+        o.textContent = (a.icon ? a.icon + ' ' : '') + a.name;
+        if (it.account_id && Number(a.id) === Number(it.account_id)) o.selected = true;
+        accountSel.appendChild(o);
+      }
+      accRow.appendChild(accountSel);
+      if (it.account_recommended) {
+        const hint = document.createElement('span');
+        hint.className = 'm-draft-hint';
+        hint.textContent = '按习惯推荐，可改';
+        accRow.appendChild(hint);
+      }
+      card.appendChild(accRow);
     } else {
+      // 账本没有可用账户：静态行如实显示（确认时服务端必填校验会拦）
       const accLine = document.createElement('div');
       accLine.className = 'm-draft-sub';
-      accLine.textContent = '账户：' + (it.account_name_resolved || '') + (it.account_recommended ? '（按习惯推荐）' : '');
+      accLine.textContent = '账户：' + (it.account_name_resolved || '未指定');
       card.appendChild(accLine);
     }
 

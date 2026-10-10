@@ -122,6 +122,7 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   check('m.js 语音同样要求安全上下文（HTTP 下不亮按钮）', js.status === 200 && js.text.includes('window.isSecureContext'), '');
   check('m.js 问句分支渲染回答卡（answer/clarify）', js.status === 200 && js.text.includes("data.mode === 'answer'") && js.text.includes('m-answer'), '');
   check('m.js 拍单按钮判空（只读视图无 mCam 不报错）', js.status === 200 && js.text.includes('if (camBtn)'), '');
+  check('m.js 账户一律下拉可改（推荐预选 + 「可改」提示，维护者反馈修复）', js.status === 200 && js.text.includes('m-draft-acc-row') && js.text.includes('按习惯推荐，可改'), '');
   const djs = await req('GET', '/static/js/app.js', { ua: DESKTOP_UA });
   check('桌面 AI 页文字快记同分流（问句出回答不建草稿）', djs.status === 200 && djs.text.includes("res.mode === 'answer'"), `HTTP ${djs.status}`);
   const css = await req('GET', '/static/css/app.css', { ua: PHONE_UA });
@@ -155,6 +156,23 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   check('明细页可见入账记录（35.00）', r.status === 200 && r.text.includes('35.00'), `HTTP ${r.status}`);
   r = await req('GET', '/', { ua: PHONE_UA });
   check('极简首页「最近 5 笔」出现该记录（非空态占位文案）', r.status === 200 && r.text.includes('m-txn') && /m-txn[\s\S]{0,400}午饭/.test(r.text), '');
+
+  /* --- 账户草稿交互（维护者反馈修复回归）：推荐账户要显示名字且可改 ---
+     晚饭→「晚餐」分类（与午饭的「午餐」不同）：确认一笔晚饭后，habitAccountId
+     单次命中即推荐（≥2 次门槛只在 LLM 习惯摘要），下一笔同关键词草稿带推荐账户 */
+  r = await req('POST', '/api/ai/text', { json: { text: '晚饭 42 元' }, ua: PHONE_UA });
+  const draft2 = r.json.items[0];
+  if (!draft2.account_id) draft2.account_id = accs[0].id;
+  r = await req('POST', '/api/ai/confirm', { json: { items: [draft2], source: 'ai_screenshot' }, ua: PHONE_UA });
+  check('第二笔确认入库（习惯历史建立）', r.status === 200 && r.json && r.json.created === 1, `HTTP ${r.status}`);
+  r = await req('POST', '/api/ai/text', { json: { text: '晚饭 66 元' }, ua: PHONE_UA });
+  const draft3 = r.json.items[0];
+  check('同关键词下一笔触发习惯推荐（account_recommended）', draft3.account_recommended === true,
+    JSON.stringify({ rec: draft3.account_recommended, acc: draft3.account_id }));
+  // 断言口径：推荐值在可选清单内且名字解析一致（不钉死具体账户，防其他套件先写入流水改变习惯兜底）
+  const recAcc = accs.find((a) => Number(a.id) === Number(draft3.account_id));
+  check('推荐账户在可选清单且带名字（路由解析 account_name_resolved，不再是空「账户：（按习惯推荐）」）',
+    !!recAcc && draft3.account_name_resolved === recAcc.name, `${draft3.account_name_resolved} vs ${recAcc && recAcc.name}`);
 
   /* --- 问账嵌入 Tab1（阶段 2）：同一输入框，问句走查账、记账句照旧出草稿 --- */
   // 首页 m-txn 最多渲染 5 条，≥5 笔时页面计数不变、断言恒真——只读不变式按库内计数（评审建议）；
