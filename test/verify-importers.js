@@ -14,6 +14,8 @@
  *        PORT=8099 HOST=127.0.0.1 DATA_DIR=<repo>/data-verify node server.js
  *      覆盖 /export/csv 导出、建账本切换后 preview + commit 全链路回导、
  *      重复导入去重、微信账单中性记录（includeNeutral）与坏请求分支
+ *      注意：手工重跑前先删 DATA_DIR（与 verify-transactions 共用 data-verify 目录名，
+ *      残留种子会让导出行数翻倍而报红——响亮失败，不是假绿）
  *
  * 运行：node test/verify-importers.js
  */
@@ -289,7 +291,15 @@ const formCsrf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[
 
   const dbFile = path.join(SERVER_DATA_DIR, 'homeledger.db');
   if (!(/^data-verify/.test(path.basename(SERVER_DATA_DIR)) && fs.existsSync(dbFile))) {
-    check('（跳过 HTTP 回导段：8099 实例库不可达或非测试目录）', true);
+    // 目录守卫是防误写真实库的保护；但 8099 活着却被拦下说明是配置错误，不能当正常跳过放绿
+    let alive = false;
+    try { await fetch(BASE + '/healthz'); alive = true; } catch { /* 未起服务，正常跳过 */ }
+    if (alive) {
+      fail++;
+      console.log(`  FAIL  8099 存活但 DATA_DIR 守卫拦下了 HTTP 段（${SERVER_DATA_DIR}）——请用 data-verify 前缀的隔离目录重跑`);
+    } else {
+      check('（跳过 HTTP 回导段：8099 未启动）', true);
+    }
     console.log(`\n结果：${pass} 通过 / ${fail} 失败\n`);
     process.exit(fail ? 1 : 0);
   }
