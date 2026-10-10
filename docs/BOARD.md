@@ -48,8 +48,8 @@
 - [ ] COOKIE_SECURE 全仓库无文档提及（Caddy HTTPS 部署未设时会话 cookie 无 Secure 标志）——下次动部署文档/compose 模板时顺带补说明
 
 ### AI 记账提取家庭成员（2026-10-11 生产库观察）
-生产库 27 笔全 AI 记账，8 条备注里 4 条带家人（老爸/老妈/红霞），全散落在 merchant/note 自由文本，没进成员体系（splits/member_name）——AI 本就不提取成员（管线只产 type/amount/date/merchant/note/category/account/currency/confidence）。
-- [ ] 触发即做：维护者认可方向后立项设计——识别句/截图里的「谁花的」映射账本成员（与 P1 习惯记忆同族，先推荐后确认，不做无确认落库）
+生产库 27 笔全 AI 记账，8 条备注里 4 条带家人（老爸/老妈/红霞），全散落在 merchant/note 自由文本。注意「成员」有两套：账本成员=注册用户（权限维度，生产库 3 人各自独立账本）、拆分成员=splits 自由文本（分摊维度，从未用过）——家人称呼两套都不属于，缺的是「消费归属人」标签维度。AI 提示词已下发账本成员名单（ai.js buildUserPrompt）但输出端无成员字段可填（管线只产 type/amount/date/merchant/note/category/account/currency/confidence）。
+- [ ] 触发即做：维护者认可方向后立项设计——识别「这笔钱为谁花的」产出归属人标签（自由文本形态参考 splits.member_name；与 P1 习惯记忆同族，先推荐后确认，不做无确认落库）
 
 ### 关于页门面与 fork 身份不符（about.js）
 GITHUB_REPO 仍指上游 Panda-995/homeledger（反馈按钮跳转目标）、maintainerNote 写「由 Panda-995 维护」——本 fork 实为 yibohub 维护，README 已改而关于页未同步。
