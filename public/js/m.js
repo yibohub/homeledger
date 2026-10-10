@@ -51,12 +51,18 @@
   window.addEventListener('resize', function () { schedule(250); });
   // 兜底：个别内核 resize 事件缺失或在去抖窗口内被吞——聚焦输入后 400ms 再核一次
   document.addEventListener('focusin', function () { schedule(400); });
+  // 500ms 轮询兜底（实测：m.js 初始化时键盘已占屏/事件丢失，基准会学小且永不自愈，
+  // 底栏从此不藏——事件在 OEM 内核上不可靠，轮询读高度是无事件内核的唯一可靠来源）。
+  // 复用 schedule 去抖：轮询不得绕过 250ms 静默窗口，否则旋转动画的中间高度会被
+  // base=0 的首采样学进基线，横屏末态最小、monotonic-up 无法自愈（评审 P1）
+  setInterval(function () { schedule(250); }, 500);
   // 旋转：基线换方向重学（matchMedia 事件替代已废弃的 orientationchange）
   var omq = mq('(orientation: portrait)');
   var onTurn = function () { base = 0; };
   if (omq.addEventListener) omq.addEventListener('change', onTurn);
   else if (omq.addListener) omq.addListener(onTurn);
-  apply(); // 初次：base=0 → 判收起 → 学当前全高
+  apply(); // 初次学基线。若此时键盘已占屏（浏览器跨页保留键盘）会学到小高度，
+  // 本会话避让失效——轮询保证键盘收起后的首个采样把基线修回全高（自愈）
 })();
 
 /* ------------------------------ Tab1 捕获区 ------------------------------ */
