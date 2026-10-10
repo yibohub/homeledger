@@ -3,6 +3,20 @@
  * 家账簿 HomeLedger —— 服务端入口
  * 纯后端：Express + EJS 服务端渲染 + SQLite，零前端框架、零原生依赖
  */
+
+/* 生产配置 fail-fast：公网部署最常见翻车点是带着默认密钥上线。
+ * 放在所有 require 之前——拒绝启动就不该碰数据库与会话；
+ * docker-compose 模板总是传入该变量（占位符兜底），所以「env 未设」和「仍是占位符」都要拦 */
+const SESSION_SECRET_DEFAULTS = new Set(['', 'homeledger-dev-secret-please-change', 'please-change-this-session-secret']);
+if (process.env.NODE_ENV === 'production' && SESSION_SECRET_DEFAULTS.has(String(process.env.SESSION_SECRET || '').trim())) {
+  console.error('');
+  console.error('  ❌ 拒绝启动：NODE_ENV=production 但 SESSION_SECRET 缺失或仍是占位/默认值。');
+  console.error('     会话 cookie 将用可预测的密钥签名，等于向公网开放会话伪造。');
+  console.error('     修复：SESSION_SECRET=$(openssl rand -hex 32) 后再启动（docker compose 请写入 .env）。');
+  console.error('');
+  process.exit(1);
+}
+
 const path = require('node:path');
 const express = require('express');
 const session = require('express-session');
@@ -17,6 +31,7 @@ const PORT = Number(process.env.PORT || 5111);
 const HOST = process.env.HOST || '0.0.0.0';
 const ROOT = __dirname;
 const APP_VERSION = require('./package.json').version;
+const IS_PROD = process.env.NODE_ENV === 'production';
 
 /** 静态资源缓存戳：应用版本 + 文件 mtime（36 进制），文件一改就变 */
 function assetStamp(rel) {
@@ -38,6 +53,17 @@ function bootstrapAdmin() {
   if (Number(c?.c || 0) > 0) return;
   const username = (process.env.ADMIN_USER || 'admin').trim();
   const password = process.env.ADMIN_PASSWORD || 'admin888';
+  // 默认密码只在「即将真的用它在公网建号」时拦：compose 模板总是传 ADMIN_PASSWORD，
+  // 已有部署的正常重启不消费它，这里放行以免炸掉升级重启
+  if (IS_PROD && password === 'admin888') {
+    console.error('');
+    console.error('  ❌ 拒绝启动：NODE_ENV=production 下首次建号仍使用默认密码 admin888。');
+    console.error('     管理员账号将以弱密码暴露给公网。');
+    console.error('     修复：ADMIN_PASSWORD=强密码 后再启动（docker compose 请写入 .env），');
+    console.error('     或先以开发模式完成初始化并在页面里改密。');
+    console.error('');
+    process.exit(1);
+  }
   const info = db.run(
     'INSERT INTO users (username, password_hash, display_name, avatar_color, is_admin, created_at) VALUES (?,?,?,?,1,?)',
     username, auth.hashPassword(password), username, util.colorFor(username), db.nowStr()

@@ -40,11 +40,14 @@ for (const f of jsFiles) {
 }
 ok(`全部 ${jsFiles.length} 个 JS 文件语法通过`, synFail === 0);
 
-// 3) 版本一致性：package.json vs about.js CHANGELOG 头部
+// 3) 版本三件套一致性：package.json vs about.js CHANGELOG 首条 vs README 更新记录首节（防手工漂移）
 const pkgVer = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
 const aboutSrc = fs.readFileSync(path.join(ROOT, 'src', 'lib', 'about.js'), 'utf8');
 const m = aboutSrc.match(/version:\s*'([^']+)'/);
-ok(`版本一致（package.json ${pkgVer} = CHANGELOG 头部 ${m ? m[1] : '?'}）`, !!m && m[1] === pkgVer);
+const readmeSrc = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+const rm = readmeSrc.match(/^###\s+v(\d+\.\d+\.\d+)/m);
+ok(`版本三件套一致（package.json ${pkgVer} = about.js ${m ? m[1] : '?'} = README ${rm ? rm[1] : '?'}）`,
+  !!m && !!rm && m[1] === pkgVer && rm[1] === pkgVer);
 
 // 4) 悬空引用：已删除的视图不再被路由引用
 const routeSrc = fs.readdirSync(path.join(ROOT, 'src', 'routes')).map((f) => fs.readFileSync(path.join(ROOT, 'src', 'routes', f), 'utf8')).join('\n') + fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
