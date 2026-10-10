@@ -52,8 +52,16 @@
     el.textContent = line + '\n' + el.textContent;
     if (++last > 40) el.textContent = el.textContent.split('\n').slice(0, 40).join('\n');
   }
-  if (!vv) log('!! visualViewport 不存在（内核过旧）');
-  else vv.addEventListener('resize', function () { n.vv++; log(fmt('vv-resize')); refresh(); });
+  if (!vv) {
+    log('!! visualViewport 不存在（内核过旧），仅监控 window resize / 聚焦');
+    window.addEventListener('resize', function () { n.win++; log(fmt('win-resize')); refresh(); });
+    document.addEventListener('focusin', function (e) { n.foc++; log(fmt('focusin', e.target.id ? '#' + e.target.id : '')); refresh(); });
+    document.addEventListener('focusout', function () { log(fmt('focusout')); refresh(); });
+    setInterval(refresh, 300);
+    refresh();
+    return;
+  }
+  vv.addEventListener('resize', function () { n.vv++; log(fmt('vv-resize')); refresh(); });
   window.addEventListener('resize', function () { n.win++; log(fmt('win-resize')); refresh(); });
   document.addEventListener('focusin', function (e) { n.foc++; log(fmt('focusin', e.target.id ? '#' + e.target.id : '')); refresh(); });
   document.addEventListener('focusout', function () { log(fmt('focusout')); refresh(); });
