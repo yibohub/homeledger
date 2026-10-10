@@ -48,10 +48,15 @@ router.get('/', auth.requireLogin, (req, res, next) => {
   // 极简模式（P10 阶段 1）：Tab1「记」只要大数字、预算条、捕获区、最近 5 笔，
   // 不算报表与台账那堆重查询（手机上白白多几十毫秒）
   if (res.locals.minimal) {
+    // P7 月末预测：预算条下一行小字（月初/无数据等场景 budgetForecast 返回 enough:false，视图静默跳过）
+    const budgetsWithForecast = budgets.map((b) => ({
+      ...b,
+      forecast: b.is_active ? require('../lib/forecast').budgetForecast(b, new Date()) : null,
+    }));
     return res.render('home-m', {
       title: '记一笔', activeNav: 'home',
       month, monthLabel: u.monthLabel(month),
-      cur, budgets, recent,
+      cur, budgets: budgetsWithForecast, recent,
       // 草稿缺账户时捕获区要能选账户（规则引擎草稿常无账户，不能让确认卡死）
       mAccounts: fd.accounts(ledgerId).map((a) => ({ id: a.id, name: a.name, icon: a.icon })),
     });

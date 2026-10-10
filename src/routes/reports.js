@@ -87,10 +87,16 @@ router.get('/reports', auth.requireLogin, (req, res) => {
   // 记账天数
   const activeDays = days.filter((d) => d.count > 0).length;
 
+  // P7 月末预测：仅当前月的月视图出总口径预测（其他月份/年度/自定义区间无从谈「月末」）
+  let monthForecast = null;
+  if (range.preset === 'month' && range.month && range.month === todayStr().slice(0, 7)) {
+    monthForecast = require('../lib/forecast').monthForecast(ledgerId, new Date());
+  }
+
   res.render('reports', {
     title: '报表分析', activeNav: 'reports',
     range, kind, sum, cats, subcats, trend, days, members, netWorth, overview,
-    compare, weekday, expenseCount, maxDay, activeDays,
+    compare, weekday, expenseCount, maxDay, activeDays, monthForecast,
     top: req.query.top || null,
     today: todayStr(),
   });

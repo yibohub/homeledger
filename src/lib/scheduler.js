@@ -157,11 +157,13 @@ function budgetPeriodRange(b, ref = new Date()) {
   }
 }
 
-function budgetUsedInRange(b, start, end) {
+function budgetUsedInRange(b, start, end, { fixedOnly = false } = {}) {
   const params = [b.ledger_id, start, end];
   const typeCond = b.trigger_type === 'income' ? "AND type IN ('income')" : "AND type IN ('expense','fee')";
+  // fixedOnly：只统计系统自动入账的固定扣费（订阅扣费/周期账单），供月末预测拆日常节奏用
+  const fixedCond = fixedOnly ? "AND source IN ('subscription','recurring')" : '';
   let sql = `SELECT COALESCE(SUM(amount_base_cents),0) AS s FROM transactions
-             WHERE ledger_id = ? AND deleted_at IS NULL AND txn_date BETWEEN ? AND ? ${typeCond}`;
+             WHERE ledger_id = ? AND deleted_at IS NULL AND txn_date BETWEEN ? AND ? ${typeCond} ${fixedCond}`;
   if (b.scope === 'category' && b.category_id) {
     sql += ' AND (category_id = ? OR category_id IN (SELECT id FROM categories WHERE parent_id = ?))';
     params.push(b.category_id, b.category_id);
@@ -329,10 +331,12 @@ function cleanup() {
 /* --------------------------------- 调度入口 -------------------------------- */
 
 function runDaily() {
-  const r = { recurring: 0, budgets: 0, debts: 0, goals: 0, subscriptions: { charged: 0, renewed: 0, notified: 0 } };
+  const r = { recurring: 0, budgets: 0, forecasts: 0, debts: 0, goals: 0, subscriptions: { charged: 0, renewed: 0, notified: 0 } };
   try { r.recurring = runDueRecurring(); } catch (e) { console.error('[scheduler] 周期账单失败:', e.message); }
   try { r.subscriptions = runSubscriptions(); } catch (e) { console.error('[scheduler] 订阅扣费失败:', e.message); }
   try { r.budgets = checkBudgets(); } catch (e) { console.error('[scheduler] 预算检查失败:', e.message); }
+  // P7 月末预测：惰性 require（forecast 依赖本模块的 advanceDate/budgetUsedInRange，避免加载环）
+  try { r.forecasts = require('./forecast').checkForecasts(); } catch (e) { console.error('[scheduler] 月末预测失败:', e.message); }
   try { r.debts = checkDebts(); } catch (e) { console.error('[scheduler] 借贷检查失败:', e.message); }
   try { r.goals = checkGoals(); } catch (e) { console.error('[scheduler] 目标检查失败:', e.message); }
   try { cleanup(); } catch { /* ignore */ }
@@ -344,10 +348,10 @@ function initScheduler() {
   setTimeout(() => {
     const r = runDaily();
     const sub = r.subscriptions || {};
-    if (r.recurring || r.budgets || r.debts || r.goals || sub.charged || sub.notified) {
+    if (r.recurring || r.budgets || r.forecasts || r.debts || r.goals || sub.charged || sub.notified) {
       console.log(
         `[scheduler] 启动检查完成：周期账单 ${r.recurring} 笔 / 订阅扣费 ${sub.charged} 笔（转正 ${sub.renewed}）/ ` +
-        `提醒 ${sub.notified} / 预算预警 ${r.budgets} / 借贷提醒 ${r.debts} / 目标提醒 ${r.goals}`
+        `提醒 ${sub.notified} / 预算预警 ${r.budgets} / 月末预测 ${r.forecasts} / 借贷提醒 ${r.debts} / 目标提醒 ${r.goals}`
       );
     }
   }, 3000).unref?.();
