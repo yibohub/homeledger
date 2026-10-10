@@ -178,7 +178,7 @@ function budgetForecast(b, ref = new Date()) {
 }
 
 /**
- * 月末预测通知（scheduler.runDaily 每天跑）：仅当「预测月末使用率 ≥ 100%」才通知——
+ * 月末预测通知（scheduler.runDaily 每天跑）：仅当「预测月末使用率 > 100%（将超出）」才通知——
  * 预测值在预算页人人可见，通知只报坏消息。与 checkBudgets 互补：它管「已经超了」，
  * 这里管「按节奏会超」。dedupe 按预算 × 月份，月内一条。
  * @returns {number} 本次发出的通知预算数

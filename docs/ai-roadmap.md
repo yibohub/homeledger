@@ -224,7 +224,7 @@
 
 **触发与通知**：计算函数放新 `lib/forecast.js`（对齐 sub-mining.js 先例：纯计算库，
 scheduler 与 routes 共用，scheduler.js 已 360 行不再加）。scheduler.runDaily 每天跑
-`checkForecasts()`（纯 SQL 毫秒级，幂等），**仅当预测月末使用率 ≥ 100% 才通知**——
+`checkForecasts()`（纯 SQL 毫秒级，幂等），**仅当预测月末使用率 > 100%（将超出预算）才通知**——
 预测值在预算页人人可见，通知只报坏消息；kind 'warn'，dedupe
 `forecast:{budget.id}:{month}:over` 月内一条，链接 /budgets。与 checkBudgets 互补：
 它管"已经超了"（danger），P7 管"按节奏会超"（warn，提前若干天）。

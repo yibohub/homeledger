@@ -257,7 +257,8 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   // 月末最后一天 +1 会造出非法日期，此时订阅对预测必然不可见（明天已跨月），直接跳过造数
   if (now.getDate() + 1 <= daysTotal) {
     const day2 = String(now.getDate() + 1).padStart(2, '0');
-    const subForm = { _csrf: scsrf, name: '预测E2E订阅', amount: '5', cycle: 'monthly', cycle_n: '1', anchor_day: String(now.getDate() + 1), next_charge_at: `${month}-${day2}`, reminder_days: '3' };
+    // auto_renew 必须显式带上：readForm 缺省按「仅提醒」处理，不带则订阅对已知扣费恒为 0（死数据）
+    const subForm = { _csrf: scsrf, name: '预测E2E订阅', amount: '5', cycle: 'monthly', cycle_n: '1', anchor_day: String(now.getDate() + 1), next_charge_at: `${month}-${day2}`, reminder_days: '3', auto_renew: '1' };
     await req('POST', '/subscriptions', { form: subForm });
   }
 
@@ -270,33 +271,23 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
 
   r = await req('GET', '/budgets');
   check('预算页渲染成功', r.status === 200, `HTTP ${r.status}`);
-  if (forecastable) {
-    check('预算页挂预测行（预计月末）', r.text.includes('预计月末'), '');
-    check('预测口径标注', r.text.includes('按本月日常节奏'), '');
-    if (overCertain) check('必然超支场景挂「将超出」', r.text.includes('将超出'), '');
-  } else {
-    check('月初 1–2 号预算页不出预测行', !r.text.includes('预计月末'), `elapsed=${elapsed}`);
-  }
+  // 断言按日档位取期望值（而非条件跳过）：任何日期跑断言总数恒定，文档口径不随日期漂移
+  check('预算页预测行按日档位出现/不出现（月初 1–2 号全局不出预测）',
+    forecastable ? r.text.includes('预计月末') : !r.text.includes('预计月末'), `elapsed=${elapsed}`);
+  check('预测口径标注随预测行出现', !forecastable || r.text.includes('按本月日常节奏'), '');
+  check('必然超支日挂「将超出」（外推为正的日期档）', !overCertain || r.text.includes('将超出'), '');
 
   /* 报表页：总口径预测条 */
   r = await req('GET', '/reports');
   check('报表页渲染成功', r.status === 200, `HTTP ${r.status}`);
-  if (forecastable) {
-    check('报表页挂月末预测条', r.text.includes('月末预测'), '');
-  } else {
-    check('月初 1–2 号报表页不出预测条', !r.text.includes('月末预测'), '');
-  }
+  check('报表页预测条按日档位出现/不出现', forecastable ? r.text.includes('月末预测') : !r.text.includes('月末预测'), '');
 
   /* 手机 Tab1：hl_simple=1 强制极简模式 */
   cookie += '; hl_simple=1';
   r = await req('GET', '/');
   check('极简首页渲染成功（layout-m）', r.status === 200 && r.text.includes('mHome'), `HTTP ${r.status}`);
-  if (forecastable) {
-    check('Tab1 预算条下挂预测小字', r.text.includes('预计月末'), '');
-    if (overCertain) check('Tab1 超支场景带「将超出」', r.text.includes('将超出'), '');
-  } else {
-    check('月初 1–2 号 Tab1 不出预测小字', !r.text.includes('预计月末'), '');
-  }
+  check('Tab1 预测小字按日档位出现/不出现', forecastable ? r.text.includes('预计月末') : !r.text.includes('预计月末'), '');
+  check('Tab1 超支场景带「将超出」（外推为正的日期档）', !overCertain || r.text.includes('将超出'), '');
 
   console.log(`\n结果：${pass} 通过 / ${fail} 失败\n`);
   process.exit(fail ? 1 : 0);
