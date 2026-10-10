@@ -76,11 +76,19 @@
   }
   // 旋转：基线换方向重学（matchMedia 事件替代已废弃的 orientationchange）
   var omq = mq('(orientation: portrait)');
-  var onTurn = function () { base = 0; };
+  var screenH = (window.screen && Number(window.screen.height)) || 0;
+  var onTurn = function () { base = screenH ? Math.round(screen.height * 0.9) : 0; };
   if (omq.addEventListener) omq.addEventListener('change', onTurn);
   else if (omq.addListener) omq.addListener(onTurn);
-  apply(); // 初次学基线。若此时键盘已占屏（浏览器跨页保留键盘）会学到小高度，
-  // 本会话避让失效——轮询保证键盘收起后的首个采样把基线修回全高（自愈）
+  // 初始基线：载入时焦点已在输入框（浏览器跨页保留键盘/刷新后键盘还在）→ 当前高度
+  // 就是键盘态，学进来整会话避让失效（真机浮窗实锤 h=base=308=open0）——改用屏高 90%
+  // 做安全上界：键盘态（308/368）必然低于其 75% 判定线（654×0.75≈490）即开即判，
+  // 收起后的真实全高（579）高于判定线不误判；无焦点则用当前高度。两者都由
+  // monotonic-up 随实测修正（分屏等屏高失真场景下真实全高会顶掉估计值）
+  var ae0 = document.activeElement;
+  var kbSuspect = !!(ae0 && /^(TEXTAREA|INPUT)$/.test(ae0.tagName)) && !!screenH;
+  base = kbSuspect ? Math.round(window.screen.height * 0.9) : vh();
+  apply();
 })();
 
 /* ------------------------------ Tab1 捕获区 ------------------------------ */
