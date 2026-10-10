@@ -99,6 +99,28 @@ function prevOf(start, end, label) {
   return { start: f(new Date(s.getTime() - len * 86400000)), end: f(new Date(e.getTime() - len * 86400000)), label: `${label}的上一期` };
 }
 
+/** 'YYYY-MM-DD' 往前推 n 天（本地时区，与 resolveRange days 分支同一套日期数学） */
+function shiftDay(today, n) {
+  const d = new Date(`${today}T00:00:00`);
+  d.setDate(d.getDate() - n);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** 相对日期 → between 单日区间（from=to），day_label 供人话 label 补注（如「前天」）。
+ *  日期一律由代码推算：模型只拿提示词里的预推结果抄写，不给它自己算日期的机会 */
+function singleDayRange(today, n, label) {
+  const d = shiftDay(today, n);
+  return { kind: 'between', from: d, to: d, day_label: label };
+}
+
+/** '2026-10-08' → '10月8日'（跨年补年份）；解析失败原样返回 */
+function cnDayLabel(dateStr, today) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || ''));
+  if (!m) return dateStr;
+  const yPart = m[1] === String(today).slice(0, 4) ? '' : `${m[1]}年`;
+  return `${yPart}${Number(m[2])}月${Number(m[3])}日`;
+}
+
 /**
  * 解析时间范围 → {start, end, label, prev}
  * kind：month / year / days / months / between；缺省本月。
@@ -144,7 +166,9 @@ function resolveRange(range, today = todayStr()) {
   if (r.kind === 'between' && /^\d{4}-\d{2}-\d{2}$/.test(String(r.from)) && /^\d{4}-\d{2}-\d{2}$/.test(String(r.to))) {
     const from = r.from <= r.to ? r.from : r.to;
     const to = r.from <= r.to ? r.to : r.from;
-    const label = `${from} ~ ${to}`;
+    // 单日区间说人话（10月8日），带相对日期词再补注（10月8日（前天））；跨天区间维持 from ~ to
+    const base = from === to ? cnDayLabel(from, today) : `${from} ~ ${to}`;
+    const label = r.day_label ? `${base}（${r.day_label}）` : base;
     const prev = /^\d{4}-\d{2}-\d{2}$/.test(String(r.prevFrom)) && /^\d{4}-\d{2}-\d{2}$/.test(String(r.prevTo))
       ? { start: r.prevFrom, end: r.prevTo, label: '上一期' }
       : prevOf(from, to, label);
@@ -203,6 +227,16 @@ function parseRangeByRules(text, today) {
     if (n) return { kind: 'months', months: n };
   }
   if ((m = s.match(/(?:近|最近)\s*(\d{1,3})\s*天/))) return { kind: 'days', days: Number(m[1]) };
+  // 相对日期单日问法（维护者实测：问「前天」模型曾曲解成最近 2 天，问的那天反而不在窗口内）。
+  // 大前天要先于前天判（子串包含）；N天前兜住「3天前/三天前」这类带数字的变体
+  if (/大前天/.test(s)) return singleDayRange(today, 3, '大前天');
+  if (/前天/.test(s)) return singleDayRange(today, 2, '前天');
+  if (/昨天|昨日/.test(s)) return singleDayRange(today, 1, '昨天');
+  if (/今天|今日/.test(s)) return singleDayRange(today, 0, '今天');
+  if ((m = s.match(/(\d{1,3}|[一两二三四五六七八九十]+)\s*天前/))) {
+    const n = parseCnNumber(m[1]);
+    if (n) return singleDayRange(today, n, `${n}天前`);
+  }
   if (/上上个月/.test(s)) return { kind: 'month', month: shiftMonth(thisMonth, -2) };
   // 「这个月」要先于「上个月」判：「这个月比上个月多花多少」主语是本月，
   // 文本里两个词都会出现，按先出现谁就归谁会错挂到上月
@@ -262,34 +296,58 @@ function matchQueryByRules(text, ctx, today = todayStr()) {
   // 2) 趋势（逐月序列）
   if (/趋势|走势/.test(s)) {
     const monthsM = s.match(/(?:近|最近)?\s*(\d{1,2}|[一两二三四五六七八九十]+)\s*个?月/);
-    const n = monthsM ? parseCnNumber(monthsM[1]) : 6;
-    return { query: { type: 'trend', metric, range, trend_months: n || 6, category: matchCategory(s, ctx, metric) } };
+    const n = monthsM ? parseCnNumber(monthsM[1]) : null;
+    const out = { query: { type: 'trend', metric, range, category: matchCategory(s, ctx, metric) } };
+    // 只显式说了「近 N 月」才带 trend_months：合并时「规则带了的才优先」，
+    // 缺省 6 由 runQuery 兜底——规则拿缺省值去盖模型解析出的显式月数是既有 bug（近三月答成六个月）
+    if (n) out.query.trend_months = n;
+    return out;
   }
-  // 3) 对比（本期 vs 上一期）
+  // 3) 对比（本期 vs 上一期）——range 不预填缺省：无时间词时交 resolveRange 兜底本月，
+  //    也只有显式 range 才在模型合并时优先
   if (/多花|少花|多收|多了|少了|增|减|变化|对比|比较|环比|同比|比.{0,6}(月|季度|年)/.test(s)) {
-    return { query: { type: 'compare', metric, range: range || { kind: 'month' }, compare_to: 'prev_period', category: matchCategory(s, ctx, metric) } };
+    return { query: { type: 'compare', metric, range, compare_to: 'prev_period', category: matchCategory(s, ctx, metric) } };
   }
   // 4) 排行（Top N / 谁花最多 / 钱花哪了）
   if (/(排名|排行|最[多大少]|top\s?\d*|前\s*[一两二三四五六七八九十\d]+|花[在到]?哪|钱去哪|钱花哪|哪[个些].{0,4}(分类|类|地方))/.test(s)) {
     const topM = s.match(/(?:前|top\s*)\s*([一两二三四五六七八九十\d]+)/i);
-    const topN = topM ? parseCnNumber(topM[1]) : 3;
-    return {
+    const topN = topM ? parseCnNumber(topM[1]) : null;
+    const out = {
       query: {
-        type: 'top', metric, range, top_n: Math.min(Math.max(topN || 3, 1), 10),
+        type: 'top', metric, range,
         by: /谁|每个人|成员/.test(s) ? 'member' : 'category',
       },
     };
+    if (topN) out.query.top_n = Math.min(Math.max(topN, 1), 10); // 同 trend：显式才带，缺省 3 由 runQuery 兜底
+    return out;
   }
   // 5) 商户/关键词流水（含「扣了没」确认型）
   const merchant = matchMerchant(s, ctx);
   if (merchant && /(多少|几笔|几回|花|付|扣|一共|合计)/.test(s)) {
-    return { query: { type: 'merchant', metric, range: range || (confirmAsk ? { kind: 'month' } : { kind: 'days', days: 90 }), merchant, confirm: confirmAsk } };
+    const out = { query: { type: 'merchant', metric, range: range || (confirmAsk ? { kind: 'month' } : { kind: 'days', days: 90 }), merchant, confirm: confirmAsk } };
+    // 缺省窗口（90 天/本月）不算显式解析：模型合并时不优先（mergeRuleParams）
+    if (!range) out.query.range_from_default = true;
+    return out;
   }
   // 6) 分类汇总 / 总计
   if (/(多少|几笔|几回|一共|合计|总计)/.test(s)) {
-    return { query: { type: 'category_summary', metric, range: range || { kind: 'month' }, category: matchCategory(s, ctx, metric) } };
+    return { query: { type: 'category_summary', metric, range, category: matchCategory(s, ctx, metric) } };
   }
   return null;
+}
+
+/**
+ * 规则/模型意图合并：规则从问法里显式解析出的参数优先，模型只补规则没答出的部分。
+ * 背景（真实 Key 验证）：模型曾把「近三个月支出趋势」的 trend_months=3 覆盖成缺省 6、
+ * 把「前天」覆盖成 days:2（最近 2 天，问的那天反而不在窗口内）。
+ * 规则侧非空即显式（缺省值已不再预填，merchant 的缺省窗口用 range_from_default 标记）。
+ */
+function mergeRuleParams(ruleQ, modelQ) {
+  const m = { ...modelQ };
+  if (ruleQ.range && !ruleQ.range_from_default) m.range = ruleQ.range;
+  if (ruleQ.trend_months) m.trend_months = ruleQ.trend_months;
+  if (ruleQ.top_n) m.top_n = ruleQ.top_n;
+  return m;
 }
 
 /* ----------------------------- 模型意图解析 ----------------------------- */
@@ -301,7 +359,8 @@ confidence：0~1，你对判断的把握。
 intent 为 query 时给出 query 结构：
   type：category_summary(分类或总计汇总) | compare(两段时间对比) | trend(逐月趋势) | top(排行) | budget(预算执行) | merchant(按商户或关键词查流水)
   metric：expense(支出) | income(收入)，缺省 expense
-  range：{"kind":"month","month":"YYYY-MM"} 或 {"kind":"year","year":2026} 或 {"kind":"days","days":30} 或 {"kind":"months","months":3} 或 {"kind":"between","from":"YYYY-MM-DD","to":"YYYY-MM-DD"}；用户没说时间就用本月
+  range：{"kind":"month","month":"YYYY-MM"} 或 {"kind":"year","year":2026} 或 {"kind":"days","days":30} 或 {"kind":"months","months":3} 或 {"kind":"between","from":"YYYY-MM-DD","to":"YYYY-MM-DD"}；用户没说时间就用本月。
+  今天/昨天/前天/大前天/N天前这类相对日期一律用 between 单日区间（from=to），日期必须照抄用户提示里「相对日期对照」给出的对应日期，禁止自己推算日期
   compare_to：compare 类型固定为 "prev_period"
   category：分类名，必须原样取自给定的分类路径列表，拿不准就留空
   merchant：商户名，优先取自给定的常见商户列表
@@ -314,6 +373,8 @@ intent 为 query 时给出 query 结构：
 function buildAskUserPrompt(text, ctx, today) {
   return [
     `今天是 ${today}。`,
+    // 相对日期预推好给模型抄写：模型自己做「今天减 2」这类日期运算不可靠（数字靠统计、日期靠代码）
+    `相对日期对照：今天=${today}、昨天=${shiftDay(today, 1)}、前天=${shiftDay(today, 2)}、大前天=${shiftDay(today, 3)}`,
     `支出分类路径：${ctx.expensePaths.join('、')}`,
     `收入分类路径：${ctx.incomePaths.join('、')}`,
     `成员：${ctx.members.join('、') || '（无）'}`,
@@ -603,8 +664,9 @@ function narrateTemplate(data) {
   const sgn = data.metric === 'income' ? '收入' : '支出';
   switch (data.type) {
     case 'category_summary': {
-      const what = data.category || `全部${sgn}`;
-      let t = `${data.label}${what}${sgn} ${money(data.total)}，共 ${data.count} 笔`;
+      // what 自带口径词，后面不再拼 sgn——否则无分类时拼出「全部支出支出」叠词
+      const what = data.category ? `${data.category}${sgn}` : `全部${sgn}`;
+      let t = `${data.label}${what} ${money(data.total)}，共 ${data.count} 笔`;
       if (data.category && data.whole_total) t += `，占${sgn}的 ${pctText(data.share)}`;
       if (data.top_merchant) t += `；最大头是「${data.top_merchant.name}」${money(data.top_merchant.total)}（${data.top_merchant.count} 笔）`;
       return t + '。';
@@ -672,7 +734,8 @@ async function handleAssistantText({ text, ledgerId, today = todayStr() }) {
       if (mp && confOk && mp.intent === 'query' && mp.query) {
         const nq = normalizeModelQuery(mp.query, ctx, ledgerId, today);
         if (nq) {
-          parsed = { query: nq };
+          // 规则已显式解析出的参数优先，模型补缺（详见 mergeRuleParams）
+          parsed = { query: parsed ? mergeRuleParams(parsed.query, nq) : nq };
           usedModel = true;
         }
       }
@@ -706,6 +769,6 @@ async function handleAssistantText({ text, ledgerId, today = todayStr() }) {
 
 module.exports = {
   looksLikeQuery, isExplicitRecord, buildQueryContext, matchQueryByRules, parseRangeByRules,
-  resolveRange, normalizeModelQuery, runQuery, narrateTemplate, narrationCovers, keyAmountsOf,
+  resolveRange, normalizeModelQuery, mergeRuleParams, runQuery, narrateTemplate, narrationCovers, keyAmountsOf,
   handleAssistantText, QUERY_HINT_RE, CLARIFY_TEXT,
 };
