@@ -18,7 +18,7 @@
 | 任务场景 | 规则短句（AGENTS.md） | 展开层（完整根因与方案） |
 |----------|----------------------|--------------------------|
 | AI 记账 / 习惯记忆 / 识别链路 | 数字靠统计语言靠模型；产出可溯源、标注如实 | [solutions/ai-invented-account.md](solutions/ai-invented-account.md)（模型臆造账户三层防线）· [ai-roadmap.md](ai-roadmap.md) |
-| 测试 / 跑批 / 回归 | 隔离 DATA_DIR；8099 残留即清；9 套件全绿才算完成 | [solutions/windows-test-infra.md](solutions/windows-test-infra.md)（端口竞态 / 退出断言 / 文件锁三坑） |
+| 测试 / 跑批 / 回归 | 隔离 DATA_DIR；8099 残留即清；13 套件全绿才算完成 | [solutions/windows-test-infra.md](solutions/windows-test-infra.md)（端口竞态 / 退出断言 / 文件锁三坑） |
 | 协作 / 发版 / PR | 标签只在明确要求时打；分支→PR→审查→合并 | [collaboration.md](collaboration.md) |
 | 版本号 / CHANGELOG / 发版状态 | 版本三件套同步；标签=发版 | [versions.md](versions.md)（版本号规则 + 逐版登记台账，⏳/✅ 即 tag 状态） |
 | 部署（NAS / GHCR / 云服务器） | 出网动作逐项确认 | [solutions/deploy-nas.md](solutions/deploy-nas.md)（NAS 语音 not-allowed 坑 + 键盘避让 ArkWeb 坑 + GHCR 发版路径）· [solutions/deploy-caddy-docker.md](solutions/deploy-caddy-docker.md)（云服务器 Caddy+Docker 服务器构建 runbook + bundle 升级流） |

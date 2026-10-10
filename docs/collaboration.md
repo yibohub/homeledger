@@ -22,7 +22,7 @@
 
 1. 较大功能先讨论对齐：落 `docs/` 文档（如 `ai-roadmap.md`），列明开放问题，维护者确认后再动手
 2. 实现 + 每个功能配 `test/verify-*.js` 回归套件，登记进 `test/run-all.js`
-3. **全量回归 12 套件全绿**才算完成（本地 Windows 也要绿，CI 是 Linux）
+3. **全量回归 13 套件全绿**才算完成（本地 Windows 也要绿，CI 是 Linux）
 4. 版本三件套同步更新：`package.json` + `src/lib/about.js` CHANGELOG + `README.md` 更新记录
 5. PR + 独立审查（子代理，审查者视角与实现者分离）→ 修复全部 P1 再合并
 6. 合并后按需打 tag 发版（见第 2 条）
