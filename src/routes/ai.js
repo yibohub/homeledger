@@ -168,6 +168,7 @@ router.post('/api/ai/text', auth.requireLogin, async (req, res) => {
   try {
     const result = await ai.analyzeBill({ images: [], text, ledgerId });
     const categories = fd.flatCategories(ledgerId);
+    const accounts = fd.accounts(ledgerId);
     res.json({
       ok: true,
       engine: result.engine,
@@ -175,6 +176,8 @@ router.post('/api/ai/text', auth.requireLogin, async (req, res) => {
       items: result.items.map((it) => ({
         ...it,
         category_path: categories.find((c) => Number(c.id) === Number(it.category_id))?.path || (it.category_name || '未分类'),
+        // 草稿卡要显示「推荐了哪个账户」；习惯推荐的账户在此按 id 解析出名字
+        account_name_resolved: accounts.find((a) => Number(a.id) === Number(it.account_id))?.name || '',
       })),
     });
   } catch (e) {
