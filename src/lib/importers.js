@@ -85,12 +85,17 @@ const SKIP_STATUS = /已关闭|交易关闭|已退款|全额退款|退款成功|
 /** 导出 CSV type_key 列的合法值 */
 const TXN_KEYS = new Set(['expense','income','transfer','lend','borrow','repay_receive','repay_pay','reimburse','refund','fee','interest','invest_buy','invest_sell','adjust']);
 
-function normalizeRow({ date, direction, amountText, merchant, desc, categoryText, accountText, status, orderNo }) {
+function normalizeRow({ date, direction, amountText, merchant, desc, categoryText, accountText, toAccountText, status, orderNo, typeKey }) {
   const amountCents = parseAmountToCents(amountText);
   const dir = String(direction || '').trim();
+  const key = String(typeKey || '').trim();
   let type = 'expense';
   let neutral = false;
-  if (/不计/.test(dir)) {
+  if (TXN_KEYS.has(key)) {
+    // 回导自家导出的 CSV：type_key 机读列优先精确还原。人读「类型」列是中文标签，
+    // 靠正则只能认出支出/收入，转账/借贷/投资/调整等会整体漂移（v1.4.1 导出列此前在导入侧未接线）
+    type = key;
+  } else if (/不计/.test(dir)) {
     // 转账 / 提现 / 充值 等「不计收支」记录：默认不导入（成对记录只导一半会破坏余额）
     type = 'transfer';
     neutral = true;
@@ -112,6 +117,7 @@ function normalizeRow({ date, direction, amountText, merchant, desc, categoryTex
     category_hint: categoryText || null,
     text,
     account_hint: accountText || guessAccountName(text) || null,
+    to_account_hint: toAccountText || null,
     order_no: orderNo || null,
   };
 }
@@ -148,6 +154,7 @@ function parseBill(buffer) {
   const iStatus = headerIndex(header, ['当前状态', '交易状态', '状态', 'status']);
   const iOrder = headerIndex(header, ['交易订单号', '交易单号', '订单号', 'order']);
   const iTypeKey = headerIndex(header, ['type_key']);
+  const iToAccount = headerIndex(header, ['转入账户', '对方账户', 'to_account']);
 
   const records = [];
   const neutralRecords = []; // 提现 / 充值 / 余额宝转出等「不计收支」记录，默认不入库
@@ -163,8 +170,10 @@ function parseBill(buffer) {
       desc: iDesc >= 0 ? r[iDesc] : '',
       categoryText: iCategory >= 0 ? r[iCategory] : '',
       accountText: iAccount >= 0 ? r[iAccount] : '',
+      toAccountText: iToAccount >= 0 ? r[iToAccount] : '',
       status,
       orderNo: iOrder >= 0 ? r[iOrder] : '',
+      typeKey: iTypeKey >= 0 ? r[iTypeKey] : '',
     });
     if (norm.skip || !norm.amount_cents) { skipped++; continue; }
     if (norm.neutral) neutralRecords.push(norm);
