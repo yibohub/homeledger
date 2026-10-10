@@ -18,12 +18,12 @@
 
 ## 🎯 进行中
 
-### P7 月末支出预测与超支预警（分支 feat/month-forecast）
+### P7 月末支出预测与超支预警（PR #24 待合并）
 - [x] 设计定案（2026-10-10 维护者「按推荐」，5 项决策记录见 [ai-roadmap.md](ai-roadmap.md) §P7）
-- [ ] `lib/forecast.js` 三分量预测（已发生 + 日历精算 + 日常外推）+ scheduler checkForecasts（仅预测将超支才通知）
-- [ ] 展示面四处：预算页逐预算 / 报表页总口径 / 手机 Tab1 一行小字 / 通知中心
-- [ ] `test/verify-forecast.js` 新套件（run-all 14→15），全量回归全绿
-- [ ] 分支 → PR → 独立审查 → 修 P1
+- [x] `lib/forecast.js` 三分量预测（已发生 + 日历精算 + 日常外推）+ scheduler checkForecasts（仅预测将超支才通知）；展示面四处：预算页逐预算 / 报表页总口径 / 手机 Tab1 一行小字 / 通知中心
+- [x] `test/verify-forecast.js` 32 断言（run-all 14→15），全量 15 套件 684 断言全绿
+- [x] 分支 → [PR #24](https://github.com/yibohub/homeledger/pull/24) → 独立审查（无 P1/P2；P3 采纳 3 条：E2E 订阅补 auto_renew、断言恒定计数、阈值口径措辞统一）
+- [ ] 合并发版（待维护者指令；版本三件套随发版更新）
 
 ### v1.11.1 发版（2026-10-10 已推 tag）
 - [x] 推 `v1.11.1` 标签 → CI 双架构构建成功（run 38044354606），GHCR 发布 `1.11.1` / `latest`
@@ -69,6 +69,10 @@
 - trend 零月可被「蒸发」：序列含 0 的月份不进关键金额，回答只列非零月也过核验（模板会列全）——完整性欠缺，无 compare 那种关系性误导
 - budget used=0 时已用与剩余同值合并，一句「预算 ¥100」即过、可不提已用/剩余
 - [ ] 触发即做：用户反馈统计口径不完整时，再评估是否给 trend/budget 加月份数/三项强制
+
+### 月末预测 walk 对日频规则长期停机积压的截断（PR #24 审查 P3，方向保守）
+knownFutureCents 从 next_run_at 起 walk 到月末，guard=62：日频规则停机积压 30+ 天时迭代数不够，未来期次被漏计（少报不虚报，30 分钟调度自愈后恢复）。
+- [ ] 触发即做：反馈「停机恢复后预测偏低」时，把 walk 起点快进到 MAX(next_run_at, 今天)（过期期次跳过不计数）
 
 ---
 
