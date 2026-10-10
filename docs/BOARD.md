@@ -80,6 +80,7 @@
 | 押后项 | 押后原因 | 触发条件 | 来源 |
 |---|---|---|---|
 | web AI 端点每用户频控 | 查询分支先于写权限检查，只读成员可触发 LLM 调用（/api/ai/text + /api/ai/chat 两处，与 v1.9.0 悬浮球同类既有面，家庭自托管接受） | 多成员日常使用或发现 token 异常消耗时 | 2026-10-09 PR #12 审查 |
+| 国产浏览器语音兜底（服务端转写） | Web Speech 识别依赖浏览器厂商云服务：华为鸿蒙等国产浏览器 API 存在但无后端（报 network），系统键盘听写已覆盖该场景 | 维护者要求这些浏览器也能点话筒时：getUserMedia+MediaRecorder 录音 → 已配 OpenAI 兼容接口 /audio/transcriptions 转写（音频出网=账单原文语音形态，符合出网边界） | 2026-10-10 华为手机实测 |
 | 账户编辑表单暴露「排序值」输入框 | 后端 `POST /accounts/:id` 已收 `sort_order`，纯前端字段；当时讨论完默认账户问题即转向 AI 话题 | 下次做账户页相关功能时顺手；或维护者再提「改默认账户」时 | 2026-10-09 默认账户讨论 |
 | CI 增加 windows-latest 一条腿 | CI 时长成本；两个 Windows-only 坑已修复且有 [防回归文档](solutions/windows-test-infra.md) | 下次再出现 Windows-only 测试问题时 | 2026-10-09 v1.8.0 批次 |
 
