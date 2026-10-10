@@ -15,6 +15,7 @@
   var vv = window.visualViewport;
   var base = 0; // 键盘收起时的可视全高基线：只在「干净高度」（不小于现基线且判定为收起）上学，
   // 键盘开着时的载入/中间高度学不进来，学小了也会在收起时自愈
+  var scale0 = 1; // 基准对应的本页干净态 scale（ArkWeb 常态 0.96 且页面间漂移，捏合判定用相对值不用魔数）
   var open = false;
   var pend = 0; // 高度稳定去抖句柄
 
@@ -25,11 +26,18 @@
   }
   function apply() {
     var h = vh();
-    // 缩掉 >25% 视为键盘弹出；scale>1.01 的捏合缩放排除（放大态下键盘判定失效是已知接受面，
-    // 精确区分需 VirtualKeyboard API，需要时再上）；地址栏收展只有 ~8% 不误触。
-    // 不绑 focus/blur 判键盘：点「识别」时焦点转移先关键盘，布局抖动可能吞掉这次点击
-    var now = base > 0 && (!vv.scale || vv.scale <= 1.01) && h < base * 0.75;
-    if (h > base) base = h; // 干净高度（不小于现基线）随时可学；键盘开着的载入学小了，收起即自愈
+    // 缩掉 >25% 视为键盘弹出。捏合放大在任何内核上都只有视觉视口缩（vv≪ih）且 scale
+    // 相对本页干净态明显变大——双条件排除；键盘则按内核形态二选一：resizes-content
+    // （ArkWeb/安卓系）ih 一起缩 → ratio≈1；resizes-visual（iOS）ih 不变 → ratio 小但
+    // scale 不变（≤干净态 ×1.05）。地址栏收展只有 ~8% 不误触。不绑 focus/blur：点
+    // 「识别」时焦点转移先关键盘，布局抖动可能吞掉这次点击
+    var ratio = vv.height / (window.innerHeight || vv.height);
+    var now = base > 0 && h < base * 0.75
+      && (ratio > 0.85 || (vv.scale || 1) <= scale0 * 1.05);
+    if (h > base) {
+      base = h; // 干净高度（不小于现基线）随时可学；键盘开着的载入学小了，收起即自愈
+      scale0 = vv.scale || scale0 || 1;
+    }
     if (now === open) return;
     open = now;
     document.body.classList.toggle('kb-open', open);
@@ -56,6 +64,16 @@
   // 复用 schedule 去抖：轮询不得绕过 250ms 静默窗口，否则旋转动画的中间高度会被
   // base=0 的首采样学进基线，横屏末态最小、monotonic-up 无法自愈（评审 P1）
   setInterval(function () { schedule(250); }, 500);
+  // 真机排查浮窗（kb-diag 页一键开关，localStorage 跨页面跟随）：
+  // 实时显示 h/base/open/scale，页面间对比即可定位「哪一页基准学歪了」
+  if (function () { try { return localStorage.getItem('kb_debug') === '1'; } catch { return false; } }()) {
+    var chip = document.createElement('div');
+    chip.style.cssText = 'position:fixed;top:2px;right:2px;z-index:9999;background:rgba(0,0,0,.72);color:#0f0;font:10px/1.4 monospace;padding:2px 5px;border-radius:4px;pointer-events:none;white-space:pre';
+    document.body.appendChild(chip);
+    setInterval(function () {
+      chip.textContent = 'path ' + location.pathname.slice(0, 12) + '\nh ' + Math.round(vh()) + ' base ' + Math.round(base) + '\nopen ' + (open ? 1 : 0) + ' scale ' + (vv.scale || 1).toFixed(2);
+    }, 300);
+  }
   // 旋转：基线换方向重学（matchMedia 事件替代已废弃的 orientationchange）
   var omq = mq('(orientation: portrait)');
   var onTurn = function () { base = 0; };
