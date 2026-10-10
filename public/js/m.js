@@ -18,11 +18,16 @@
   var scale0 = 1; // 基准对应的本页干净态 scale（ArkWeb 常态 0.96 且页面间漂移，捏合判定用相对值不用魔数）
   var open = false;
   var pend = 0; // 高度稳定去抖句柄
+  var stillCount = 0, lastH = -1; // 高度连续稳定采样计数（向下修正用）
 
   // 键盘高度变化有两种上报形态：resizes-visual 只改 vv.height、resizes-content 连
   // innerHeight 一起改（个别内核只改 innerHeight）——取两者最小值，两种形态都检测得到
   function vh() {
     return Math.min(vv.height, window.innerHeight || vv.height);
+  }
+  function editableFocused() {
+    var ae = document.activeElement;
+    return !!(ae && /^(TEXTAREA|INPUT)$/.test(ae.tagName));
   }
   function apply() {
     var h = vh();
@@ -38,6 +43,12 @@
       base = h; // 干净高度（不小于现基线）随时可学；键盘开着的载入学小了，收起即自愈
       scale0 = vv.scale || scale0 || 1;
     }
+    // 向下修正：键盘必伴随输入焦点——焦点不在输入框且高度连续稳定时，小高度不是键盘
+    // 而是屏高估计偏差（分屏/浮窗下 screen 报全屏物理高），base 允许落回实测值
+    // （monotonic-up 只能向上修，估计偏大时无此修正会整会话常开——评审 P2）
+    if (h === lastH) stillCount++; else stillCount = 0;
+    lastH = h;
+    if (!editableFocused() && h < base && stillCount >= 3) base = h;
     if (now === open) return;
     open = now;
     document.body.classList.toggle('kb-open', open);
@@ -74,20 +85,21 @@
       chip.textContent = 'path ' + location.pathname.slice(0, 12) + '\nh ' + Math.round(vh()) + ' base ' + Math.round(base) + '\nopen ' + (open ? 1 : 0) + ' scale ' + (vv.scale || 1).toFixed(2);
     }, 300);
   }
-  // 旋转：基线换方向重学（matchMedia 事件替代已废弃的 orientationchange）
+  // 旋转：基线换方向重学（matchMedia 事件替代已废弃的 orientationchange）。
+  // 焦点在输入框才用屏高上界（键盘大概率还开着）；否则置 0 学实测高度——横屏 chrome
+  // 占比高（三星 Internet 类），无条件屏高上界会让判定线高于干净高度、整会话常开（评审 P2）
   var omq = mq('(orientation: portrait)');
   var screenH = (window.screen && Number(window.screen.height)) || 0;
-  var onTurn = function () { base = screenH ? Math.round(screen.height * 0.9) : 0; };
+  var onTurn = function () { base = (editableFocused() && screenH) ? Math.round(window.screen.height * 0.9) : 0; };
   if (omq.addEventListener) omq.addEventListener('change', onTurn);
   else if (omq.addListener) omq.addListener(onTurn);
   // 初始基线：载入时焦点已在输入框（浏览器跨页保留键盘/刷新后键盘还在）→ 当前高度
   // 就是键盘态，学进来整会话避让失效（真机浮窗实锤 h=base=308=open0）——改用屏高 90%
   // 做安全上界：键盘态（308/368）必然低于其 75% 判定线（654×0.75≈490）即开即判，
-  // 收起后的真实全高（579）高于判定线不误判；无焦点则用当前高度。两者都由
-  // monotonic-up 随实测修正（分屏等屏高失真场景下真实全高会顶掉估计值）
-  var ae0 = document.activeElement;
-  var kbSuspect = !!(ae0 && /^(TEXTAREA|INPUT)$/.test(ae0.tagName)) && !!screenH;
-  base = kbSuspect ? Math.round(window.screen.height * 0.9) : vh();
+  // 收起后的真实全高（579）高于判定线不误判；无焦点则用当前高度。
+  // 屏高上界的偏差方向是「常开」：分屏/浮窗下 screen 报全屏物理高、判定线可能高于
+  // 真实窗口高度——由上方向下修正落回实测（monotonic-up 只管向上，不覆盖此向）
+  base = (editableFocused() && screenH) ? Math.round(window.screen.height * 0.9) : vh();
   apply();
 })();
 
