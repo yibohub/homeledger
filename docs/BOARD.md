@@ -47,6 +47,10 @@
 - [ ] 无容器公网部署绕过守卫：源码直跑（npm start/systemd）通常不设 NODE_ENV，两守卫全部失效且 HOST 默认 0.0.0.0——出现该部署场景时加「无 NODE_ENV + 非本机监听」告警
 - [ ] COOKIE_SECURE 全仓库无文档提及（Caddy HTTPS 部署未设时会话 cookie 无 Secure 标志）——下次动部署文档/compose 模板时顺带补说明
 
+### AI 记账提取家庭成员（2026-10-11 生产库观察）
+生产库 27 笔全 AI 记账，8 条备注里 4 条带家人（老爸/老妈/红霞），全散落在 merchant/note 自由文本，没进成员体系（splits/member_name）——AI 本就不提取成员（管线只产 type/amount/date/merchant/note/category/account/currency/confidence）。
+- [ ] 触发即做：维护者认可方向后立项设计——识别句/截图里的「谁花的」映射账本成员（与 P1 习惯记忆同族，先推荐后确认，不做无确认落库）
+
 ### 关于页门面与 fork 身份不符（about.js）
 GITHUB_REPO 仍指上游 Panda-995/homeledger（反馈按钮跳转目标）、maintainerNote 写「由 Panda-995 维护」——本 fork 实为 yibohub 维护，README 已改而关于页未同步。
 - [ ] 触发即做：下次动关于页/反馈链路时，改 yibohub 口径（跳转目标变化需维护者确认指向 fork 还是保留上游）
