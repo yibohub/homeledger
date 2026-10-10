@@ -85,7 +85,8 @@ const prodEnv = (n, extra = {}) => ({
     const r = await waitExit(s.child);
     check('production 未设 SESSION_SECRET → 拒启', !r.timedOut && r.code !== 0, `exit=${r.code}`);
     check('拒启信息指明修复方法（openssl rand）', s.out().includes('openssl rand'));
-    check('SESSION_SECRET 拒启发生在建库前（无库文件残留）', !fs.existsSync(path.join(ROOT, 'data-verify-startup-1', 'homeledger.db')));
+    // 断言整个数据目录不存在（比只查库文件强：require db.js 就会 mkdirSync，守卫若被挪后仍能抓到）
+    check('SESSION_SECRET 拒启发生在建库前（无数据目录残留）', !fs.existsSync(path.join(ROOT, 'data-verify-startup-1')));
   }
   {
     const s = startServer(prodEnv(2, { SESSION_SECRET: 'please-change-this-session-secret' }));
@@ -96,6 +97,11 @@ const prodEnv = (n, extra = {}) => ({
     const s = startServer(prodEnv(3, { SESSION_SECRET: 'homeledger-dev-secret-please-change' }));
     const r = await waitExit(s.child);
     check('production 传代码默认值 SESSION_SECRET → 拒启', !r.timedOut && r.code !== 0, `exit=${r.code}`);
+  }
+  {
+    const s = startServer(prodEnv(9, { SESSION_SECRET: '请改成随机长字符串' }));
+    const r = await waitExit(s.child);
+    check('production 原样照抄 README 示例的 SESSION_SECRET → 拒启（审查 P2）', !r.timedOut && r.code !== 0, `exit=${r.code}`);
   }
 
   /* ADMIN_PASSWORD：只在首次建号时消费——默认密码两种到达路径都拒 */
@@ -108,6 +114,11 @@ const prodEnv = (n, extra = {}) => ({
     const s = startServer(prodEnv(5, { ADMIN_PASSWORD: '' }));
     const r = await waitExit(s.child);
     check('production 首次建号未设 ADMIN_PASSWORD（compose 缺省路径）→ 拒启', !r.timedOut && r.code !== 0, `exit=${r.code}`);
+  }
+  {
+    const s = startServer(prodEnv(10, { ADMIN_PASSWORD: '请改成你的强密码' }));
+    const r = await waitExit(s.child);
+    check('production 原样照抄 README 示例的 ADMIN_PASSWORD 首次建号 → 拒启（审查 P2）', !r.timedOut && r.code !== 0, `exit=${r.code}`);
   }
 
   /* 全随机配置 + 空库：正常启动，不误伤 */

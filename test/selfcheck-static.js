@@ -45,7 +45,9 @@ const pkgVer = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8
 const aboutSrc = fs.readFileSync(path.join(ROOT, 'src', 'lib', 'about.js'), 'utf8');
 const m = aboutSrc.match(/version:\s*'([^']+)'/);
 const readmeSrc = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
-const rm = readmeSrc.match(/^###\s+v(\d+\.\d+\.\d+)/m);
+// 只在「更新记录」节内取首节版本，防止该节之前出现同形态标题误配
+const changelogSection = readmeSrc.split(/^##\s.*更新记录.*$/m)[1] || '';
+const rm = changelogSection.match(/^###\s+v(\d+\.\d+\.\d+)/m);
 ok(`版本三件套一致（package.json ${pkgVer} = about.js ${m ? m[1] : '?'} = README ${rm ? rm[1] : '?'}）`,
   !!m && !!rm && m[1] === pkgVer && rm[1] === pkgVer);
 

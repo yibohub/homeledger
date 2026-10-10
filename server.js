@@ -6,8 +6,11 @@
 
 /* 生产配置 fail-fast：公网部署最常见翻车点是带着默认密钥上线。
  * 放在所有 require 之前——拒绝启动就不该碰数据库与会话；
- * docker-compose 模板总是传入该变量（占位符兜底），所以「env 未设」和「仍是占位符」都要拦 */
-const SESSION_SECRET_DEFAULTS = new Set(['', 'homeledger-dev-secret-please-change', 'please-change-this-session-secret']);
+ * docker-compose 模板总是传入该变量（占位符兜底），所以「env 未设」和「仍是占位符」都要拦。
+ * 黑名单含 README 快速开始示例的原样占位值——照抄示例不改的人正是要拦的对象 */
+const SESSION_SECRET_DEFAULTS = new Set([
+  '', 'homeledger-dev-secret-please-change', 'please-change-this-session-secret', '请改成随机长字符串',
+]);
 if (process.env.NODE_ENV === 'production' && SESSION_SECRET_DEFAULTS.has(String(process.env.SESSION_SECRET || '').trim())) {
   console.error('');
   console.error('  ❌ 拒绝启动：NODE_ENV=production 但 SESSION_SECRET 缺失或仍是占位/默认值。');
@@ -54,10 +57,11 @@ function bootstrapAdmin() {
   const username = (process.env.ADMIN_USER || 'admin').trim();
   const password = process.env.ADMIN_PASSWORD || 'admin888';
   // 默认密码只在「即将真的用它在公网建号」时拦：compose 模板总是传 ADMIN_PASSWORD，
-  // 已有部署的正常重启不消费它，这里放行以免炸掉升级重启
-  if (IS_PROD && password === 'admin888') {
+  // 已有部署的正常重启不消费它，这里放行以免炸掉升级重启。
+  // '请改成你的强密码' 是 README 快速开始示例的原样占位值，同样视为未配置
+  if (IS_PROD && (password === 'admin888' || password === '请改成你的强密码')) {
     console.error('');
-    console.error('  ❌ 拒绝启动：NODE_ENV=production 下首次建号仍使用默认密码 admin888。');
+    console.error('  ❌ 拒绝启动：NODE_ENV=production 下首次建号仍使用默认密码（admin888）或 README 示例占位值。');
     console.error('     管理员账号将以弱密码暴露给公网。');
     console.error('     修复：ADMIN_PASSWORD=强密码 后再启动（docker compose 请写入 .env），');
     console.error('     或先以开发模式完成初始化并在页面里改密。');

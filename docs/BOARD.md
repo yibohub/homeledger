@@ -1,7 +1,7 @@
 # 项目看板（docs/BOARD.md）
 
 > **单一入口**：家账簿做到哪、下一步做啥、什么押后了。回答「下一步」先看这里，不要翻 ai-roadmap/solutions 找进度——那里只放设计与根因，不重复状态。
-> **最近更新**：2026-10-10（v1.11.0 已发版，项目已部署到云服务器、NAS 侧押后；startup-guard 批次 PR 待合并：版本三件套断言 + 生产配置 fail-fast，全量 14 套件 650 断言）
+> **最近更新**：2026-10-10（v1.11.0 已发版，项目已部署到云服务器、NAS 侧押后；startup-guard 批次 PR 待合并：版本三件套断言 + 生产配置 fail-fast，全量 14 套件 652 断言）
 
 ## 怎么维护（规则）
 
@@ -31,6 +31,11 @@
 ---
 
 ## 📋 待办（下一步，按优先级）
+
+### 启动守卫遗留（PR #23 审查确认）
+- [ ] **下个发版必做**：README 更新记录加升级注意——曾用 compose 占位/默认 SESSION_SECRET 上线的用户，升级后容器会 restart 循环（fail-fast 预期行为，日志含修复指引），须先在 .env 设随机密钥
+- [ ] 无容器公网部署绕过守卫：源码直跑（npm start/systemd）通常不设 NODE_ENV，两守卫全部失效且 HOST 默认 0.0.0.0——出现该部署场景时加「无 NODE_ENV + 非本机监听」告警
+- [ ] COOKIE_SECURE 全仓库无文档提及（Caddy HTTPS 部署未设时会话 cookie 无 Secure 标志）——下次动部署文档/compose 模板时顺带补说明
 
 ### 支付宝 CSV 前导行误判表头（isHeaderRow 假阳性）
 前导行含「起始日期/终止日期」且带逗号凑满 4 列时（verify-importers 夹具构造时发现；真实支付宝导出为单列前导行，不受影响），会被误判为表头导致全部数据行因取不到金额列被跳过。
@@ -88,7 +93,7 @@
 
 | 时间 | 提交 / PR | 内容 |
 |---|---|---|
-| 2026-10-10 | 本批 PR（startup-guard） | **版本三件套一致性断言 + 生产配置 fail-fast**：selfcheck-static 三处版本号（package.json / about.js 首条 / README 首节）不一致即红；`NODE_ENV=production` 下 SESSION_SECRET 未设或仍是 compose 占位/代码默认值直接拒启（守卫置于全部 require 之前，建库前即退），首次建号用默认密码 admin888 拒启——ADMIN_PASSWORD 只在真正消费它的首次建号时拦，不炸已有部署的升级重启（compose 模板总是传该变量）；新增 verify-startup 11 断言（纯 spawn、独立端口/目录），全量 14 套件 650 断言全绿 |
+| 2026-10-10 | 本批 PR（startup-guard） | **版本三件套一致性断言 + 生产配置 fail-fast**：selfcheck-static 三处版本号（package.json / about.js 首条 / README 更新记录首节）不一致即红；`NODE_ENV=production` 下 SESSION_SECRET 未设或仍是 compose 占位/代码默认/README 示例占位值直接拒启（守卫置于全部 require 之前，不碰数据库即退），首次建号用默认/占位密码拒启——ADMIN_PASSWORD 只在真正消费它的首次建号分支拦截，已有部署重启走 users>0 早退、升级不受影响；新增 verify-startup 13 断言（纯 spawn、独立端口/目录），全量 14 套件 652 断言全绿 |
 | 2026-10-10 | PR #22（合并 c1f1bf3） | **verify-importers 导入/导出回归套件（56 断言）+ 回导类型保真收尾**：微信/支付宝 CSV 归类断言（收/支/不计收支/「/」、状态跳过、GBK 编码、金额剥 ¥）；导出→回导 14 种类型经 type_key 机读列 1:1 还原、「转入账户」列回导双边账户、负数调整保向、重复导入去重（v1.4.1 导出列此前在导入侧未接线，12/14 类型回导坍缩成支出/收入；部分接线随 v1.11.0 提交先行入库，本批补全对方账户优先列值 + parseCsvLine 导出）；顺手修 layout.ejs 匿名错误页 500（三处 canWrite 加 ledger 守卫，PR #7 审查登记项销账）；独立审查无 P1/P2、3×P3 采纳；全量 13 套件 639 断言全绿 |
 | 2026-10-10 | 本批 PR | **识别等待反馈（维护者反馈）**：AI 返回前极简捕获区按钮图标旋转（mSpin）+ 文案「识别中…」finally 复原；桌面文字快记同款 + 补 try/finally 修断网时按钮永久禁用（postJson 网络层异常会抛）；桌面照片识别与悬浮球打字指示器原本已有；verify-minimal 44→47，全量 12 套件 583 断言全绿 |
 | 2026-10-10 | 本批 PR | **手机软键盘适配（维护者反馈）**：键盘弹出把固定底栏顶上来盖住捕获区输入框/识别按钮，须先收键盘才能操作——m.js 拆双 IIFE，VisualViewport 判键盘（>25% 缩量，排除捏合缩放/地址栏收展）开 kb-open 藏底栏 + 捕获区居中，收起自动恢复，全极简页面生效；verify-minimal 42→44，全量 12 套件 580 断言全绿 |
