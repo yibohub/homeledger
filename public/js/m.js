@@ -13,16 +13,23 @@
   var mq = window.matchMedia;
   if (!mq || !mq('(pointer: coarse)').matches || !window.visualViewport) return;
   var vv = window.visualViewport;
-  var base = 0; // 键盘收起时的可视全高基线（只向上更新；旋转后重置重学）
+  var base = 0; // 键盘收起时的可视全高基线：只在「干净高度」（不小于现基线且判定为收起）上学，
+  // 键盘开着时的载入/中间高度学不进来，学小了也会在收起时自愈
   var open = false;
   var pend = 0; // 高度稳定去抖句柄
 
+  // 键盘高度变化有两种上报形态：resizes-visual 只改 vv.height、resizes-content 连
+  // innerHeight 一起改（个别内核只改 innerHeight）——取两者最小值，两种形态都检测得到
+  function vh() {
+    return Math.min(vv.height, window.innerHeight || vv.height);
+  }
   function apply() {
-    if (vv.height > base) base = vv.height;
+    var h = vh();
     // 缩掉 >25% 视为键盘弹出；scale>1.01 的捏合缩放排除（放大态下键盘判定失效是已知接受面，
     // 精确区分需 VirtualKeyboard API，需要时再上）；地址栏收展只有 ~8% 不误触。
-    // 不绑 focus/blur：点「识别」时焦点转移先关键盘，布局抖动可能吞掉这次点击
-    var now = base > 0 && (!vv.scale || vv.scale <= 1.01) && vv.height < base * 0.75;
+    // 不绑 focus/blur 判键盘：点「识别」时焦点转移先关键盘，布局抖动可能吞掉这次点击
+    var now = base > 0 && (!vv.scale || vv.scale <= 1.01) && h < base * 0.75;
+    if (h > base) base = h; // 干净高度（不小于现基线）随时可学；键盘开着的载入学小了，收起即自愈
     if (now === open) return;
     open = now;
     document.body.classList.toggle('kb-open', open);
@@ -34,17 +41,22 @@
     }
   }
   // 键盘弹出/收起与旋转都会连续触发 resize：等高度稳定 250ms 再判定，
-  // 否则旋转动画的中间高度/旧方向高度会被学进基线，把 kb-open 误锁一整个横屏会话（评审 P2）
-  vv.addEventListener('resize', function () {
+  // 否则旋转动画的中间高度会被学进基线，把 kb-open 误锁一整个横屏会话
+  // window resize 一并监听：个别内核只改 innerHeight（vv 不动），收起方向也要有采样点（评审 P2）
+  function schedule(delay) {
     if (pend) clearTimeout(pend);
-    pend = setTimeout(function () { pend = 0; apply(); }, 250);
-  });
+    pend = setTimeout(function () { pend = 0; apply(); }, delay);
+  }
+  vv.addEventListener('resize', function () { schedule(250); });
+  window.addEventListener('resize', function () { schedule(250); });
+  // 兜底：个别内核 resize 事件缺失或在去抖窗口内被吞——聚焦输入后 400ms 再核一次
+  document.addEventListener('focusin', function () { schedule(400); });
   // 旋转：基线换方向重学（matchMedia 事件替代已废弃的 orientationchange）
   var omq = mq('(orientation: portrait)');
   var onTurn = function () { base = 0; };
   if (omq.addEventListener) omq.addEventListener('change', onTurn);
   else if (omq.addListener) omq.addListener(onTurn);
-  apply(); // 初次：学基线，键盘必然未开
+  apply(); // 初次：base=0 → 判收起 → 学当前全高
 })();
 
 /* ------------------------------ Tab1 捕获区 ------------------------------ */
