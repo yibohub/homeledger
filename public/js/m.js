@@ -25,10 +25,13 @@
   }
   function apply() {
     var h = vh();
-    // 缩掉 >25% 视为键盘弹出；scale>1.01 的捏合缩放排除（放大态下键盘判定失效是已知接受面，
-    // 精确区分需 VirtualKeyboard API，需要时再上）；地址栏收展只有 ~8% 不误触。
-    // 不绑 focus/blur 判键盘：点「识别」时焦点转移先关键盘，布局抖动可能吞掉这次点击
-    var now = base > 0 && (!vv.scale || vv.scale <= 1.01) && h < base * 0.75;
+    // 缩掉 >25% 视为键盘弹出。键盘=布局视口一起缩（vv≈ih），捏合放大=只有视觉视口缩
+    // （vv≪ih）——用 vv/ih 比例区分两者：ArkWeb 常态 scale 0.96 且页面间不一，
+    // scale 魔数守卫在页面间不可靠（华为真机排查结论，见 solutions/deploy-nas.md 坑二）；
+    // 地址栏收展只有 ~8% 不误触。不绑 focus/blur：点「识别」时焦点转移先关键盘，
+    // 布局抖动可能吞掉这次点击
+    var ratio = vv.height / (window.innerHeight || vv.height);
+    var now = base > 0 && ratio > 0.85 && h < base * 0.75;
     if (h > base) base = h; // 干净高度（不小于现基线）随时可学；键盘开着的载入学小了，收起即自愈
     if (now === open) return;
     open = now;
@@ -56,6 +59,16 @@
   // 复用 schedule 去抖：轮询不得绕过 250ms 静默窗口，否则旋转动画的中间高度会被
   // base=0 的首采样学进基线，横屏末态最小、monotonic-up 无法自愈（评审 P1）
   setInterval(function () { schedule(250); }, 500);
+  // 真机排查浮窗（kb-diag 页一键开关，localStorage 跨页面跟随）：
+  // 实时显示 h/base/open/scale，页面间对比即可定位「哪一页基准学歪了」
+  if (function () { try { return localStorage.getItem('kb_debug') === '1'; } catch { return false; } }()) {
+    var chip = document.createElement('div');
+    chip.style.cssText = 'position:fixed;top:2px;right:2px;z-index:9999;background:rgba(0,0,0,.72);color:#0f0;font:10px/1.4 monospace;padding:2px 5px;border-radius:4px;pointer-events:none;white-space:pre';
+    document.body.appendChild(chip);
+    setInterval(function () {
+      chip.textContent = 'path ' + location.pathname.slice(0, 12) + '\nh ' + Math.round(vh()) + ' base ' + Math.round(base) + '\nopen ' + (open ? 1 : 0) + ' scale ' + (vv.scale || 1).toFixed(2);
+    }, 300);
+  }
   // 旋转：基线换方向重学（matchMedia 事件替代已废弃的 orientationchange）
   var omq = mq('(orientation: portrait)');
   var onTurn = function () { base = 0; };

@@ -28,6 +28,7 @@
   <tr><th>UA</th><td id="ua" style="max-width:280px;word-break:break-all">—</td></tr>
 </table>
 <textarea id="box" placeholder="点这里弹键盘"></textarea>
+<p><button id="chipbtn" style="padding:8px 14px;font-size:14px"></button> <span class="tiny muted" style="font-size:12px">调试浮窗显示在每个极简页面右上角（h=当前高度 base=基准 open=是否判定键盘），跟着你走「记 → AI记账 → 记」复现路径，坏的时候截图浮窗即可</span></p>
 <h3>事件日志（最新在上）</h3>
 <div id="log">（等待事件…）</div>
 <script>
@@ -67,6 +68,18 @@
   document.addEventListener('focusout', function () { log(fmt('focusout')); refresh(); });
   setInterval(refresh, 300);
   refresh();
+  var chipbtn = document.getElementById('chipbtn');
+  function paintChip() {
+    var on = false;
+    try { on = localStorage.getItem('kb_debug') === '1'; } catch (e) {}
+    chipbtn.textContent = on ? '关闭 m.js 调试浮窗' : '开启 m.js 调试浮窗（排查其他页面用）';
+  }
+  chipbtn.addEventListener('click', function () {
+    var on = false;
+    try { on = localStorage.getItem('kb_debug') === '1'; localStorage.setItem('kb_debug', on ? '0' : '1'); } catch (e) {}
+    paintChip();
+  });
+  paintChip();
 })();
 </script>
 </body>
