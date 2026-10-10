@@ -7,6 +7,7 @@ const txn = require('../lib/txn');
 const fd = require('../lib/formdata');
 const u = require('../lib/util');
 const sch = require('../lib/scheduler');
+const forecast = require('../lib/forecast');
 
 const router = express.Router();
 
@@ -63,6 +64,8 @@ router.get('/budgets', auth.requireLogin, (req, res) => {
       ratio: amount > 0 ? (used / amount) * 100 : 0,
       remain: amount - used,
       dailyAllowance: Math.max(0, Math.round((amount - used) / Math.max(1, remainingDays(b, range)))),
+      // P7 月末预测：仅启用中的月度支出口径预算（budgetForecast 内部还会按已超支等场景降级）
+      forecast: b.is_active ? forecast.budgetForecast(b, new Date()) : null,
       scopeLabel: b.scope === 'overall' ? '总预算' : catLabel || `账户 · ${b.account_name || '未指定'}`,
       periodLabel: { monthly: '每月', yearly: '每年', weekly: '每周', custom: '自定义' }[b.period] || '每月',
     };

@@ -58,6 +58,19 @@
           </span>
           <span class="muted">剩余每天可用 <%= helpers.fmtAmount(b.dailyAllowance) %></span>
         </div>
+        <% if (b.forecast && b.forecast.enough) { %>
+        <div class="row between mt8 tiny">
+          <span>
+            预计月末 <b><%= helpers.fmtAmount(b.forecast.forecast_cents) %></b>
+            <% if (b.forecast.will_over) { %>
+              <span class="amount expense">将超出 <%= helpers.fmtAmount(b.forecast.over_cents) %></span>
+            <% } else { %>
+              <span class="amount income">预算内</span>
+            <% } %>
+          </span>
+          <span class="muted">按本月日常节奏+已知扣费估算</span>
+        </div>
+        <% } %>
 
         <div class="row tiny mt12" style="gap:10px">
           <a href="#" class="budget-edit" data-id="<%= b.id %>">修改</a>

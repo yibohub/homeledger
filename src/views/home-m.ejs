@@ -24,6 +24,11 @@
       <div class="bar <%= b.ratio >= 100 ? 'over' : b.ratio >= (b.alert_pct || 80) ? 'warn' : '' %>">
         <div class="bar-fill" style="width:<%= Math.min(100, Math.round(b.ratio)) %>%"></div>
       </div>
+      <% if (b.forecast && b.forecast.enough) { %>
+      <div class="tiny" style="margin-top:4px<%= b.forecast.will_over ? ';color:var(--expense)' : '' %>">
+        预计月末 <%= helpers.fmtAmount(b.forecast.forecast_cents) %><% if (b.forecast.will_over) { %>，将超出 <%= helpers.fmtAmount(b.forecast.over_cents) %><% } %>
+      </div>
+      <% } %>
       <% if (budgets.length > 1) { %>
       <a class="tiny muted" href="/budgets">还有 <%= budgets.length - 1 %> 个预算 →</a>
       <% } %>
