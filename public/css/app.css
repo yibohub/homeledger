@@ -942,7 +942,9 @@ a.chip:hover { border-color: var(--primary); color: var(--primary); background: 
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  /* iteration-count 一并压到 1：否则 mSpin/aiMicPulse 等 infinite 动画在 .01ms 时长下
+     每帧落随机相位，图标呈随机角度抖动而非静止（评审建议，一次覆盖所有 infinite 动画） */
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
 
 /* ------------------------------ 关于页 ------------------------------ */

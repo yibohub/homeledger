@@ -172,6 +172,7 @@
     goBtn.disabled = true;
     // AI 返回要几秒：图标转起来 + 文案变「识别中…」，别让用户以为卡死
     goBtn.classList.add('busy');
+    goBtn.setAttribute('aria-busy', 'true'); // 读屏用户同样感知进行中状态
     if (goSpan) goSpan.textContent = '识别中…';
     clearSay();
     try {
@@ -204,6 +205,7 @@
       busy = false;
       goBtn.disabled = false;
       goBtn.classList.remove('busy');
+      goBtn.removeAttribute('aria-busy');
       if (goSpan) goSpan.textContent = goLabel;
     }
   }
