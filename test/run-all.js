@@ -12,6 +12,7 @@ const ROOT = path.join(__dirname, '..');
 const PORT = 8099;
 const SUITES = [
   'verify-about.js',
+  'verify-startup.js',
   'verify-settings-admin.js',
   'verify-ai-chat.js',
   'verify-ai-image.js',
