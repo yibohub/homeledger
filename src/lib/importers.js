@@ -237,17 +237,17 @@ function importRecords({
           : resolveAccountId(ledgerId, rec.account_hint) || defaultAccountId;
 
         if (rec.neutral) {
-          // 提现 / 充值：账户之间搬钱，不计入收支。对方账户优先从说明文字推断
-          const cpName = guessAccountName(rec.text) || NEUTRAL_FALLBACK_ACCOUNT;
+          // 提现 / 充值：账户之间搬钱，不计入收支。对方账户优先取回导的「转入账户」列，再从说明文字推断
+          const cpName = rec.to_account_hint || guessAccountName(rec.text) || NEUTRAL_FALLBACK_ACCOUNT;
           toAccountId = autoCreateAccount
             ? ensureAccount(ledgerId, cpName, createdAccounts) || ensureAccount(ledgerId, NEUTRAL_FALLBACK_ACCOUNT, createdAccounts)
-            : resolveAccountId(ledgerId, cpName) || null;
+            : resolveAccountId(ledgerId, rec.to_account_hint) || resolveAccountId(ledgerId, guessAccountName(rec.text)) || null;
         } else if (rec.type === 'transfer' || rec.type === 'invest_buy' || rec.type === 'invest_sell' || rec.type === 'lend' || rec.type === 'borrow') {
-          // 回导的双边类型（转账/借贷）：对方账户从说明文字推断；推不出就按 transfer 兜底（一方账户仍保留）
-          const cpName = guessAccountName(rec.text) || NEUTRAL_FALLBACK_ACCOUNT;
+          // 回导的双边类型（转账/借贷/投资）：对方账户优先取「转入账户」列，其次从说明文字推断；推不出就按 transfer 兜底（一方账户仍保留）
+          const cpName = rec.to_account_hint || guessAccountName(rec.text) || NEUTRAL_FALLBACK_ACCOUNT;
           toAccountId = autoCreateAccount
             ? ensureAccount(ledgerId, cpName, createdAccounts)
-            : resolveAccountId(ledgerId, cpName) || null;
+            : resolveAccountId(ledgerId, rec.to_account_hint) || resolveAccountId(ledgerId, guessAccountName(rec.text)) || null;
           if (!toAccountId) rec.type = 'transfer';
         } else {
           const kind = rec.type === 'income' ? 'income' : 'expense';
@@ -318,4 +318,4 @@ function exportRows(ledgerId, rows) {
   ]);
 }
 
-module.exports = { parseBill, importRecords, toCsv, csvEscape, EXPORT_HEADER, exportRows, decodeBuffer, normalizeDate };
+module.exports = { parseBill, importRecords, toCsv, csvEscape, EXPORT_HEADER, exportRows, decodeBuffer, normalizeDate, parseCsvLine };
