@@ -1431,7 +1431,7 @@ html { scroll-behavior: smooth; }
 .m-budget .bar.over .bar-fill { background: var(--expense); }
 
 .m-capture-input { display: flex; flex-direction: column; gap: 8px; }
-.m-capture-input textarea { width: 100%; resize: none; border: 1px solid var(--border); border-radius: 11px; padding: 9px 11px; font-size: 14px; background: var(--card-2); color: var(--text); line-height: 1.45; }
+.m-capture-input textarea { width: 100%; resize: none; border: 1px solid var(--border); border-radius: 11px; padding: 9px 11px; font-size: 14px; background: var(--card-2); color: var(--text); line-height: 1.45; min-height: 0; /* 覆盖全局 textarea 72px 下限，高度完全由 rows 掌控（审查 P3） */ }
 .m-capture-input textarea:focus { outline: none; border-color: var(--primary); }
 /* 操作行：输入框独占一行后，按钮带文字标签（长辈可发现性）、更大的点击目标；
    次操作（语音/拍单）靠左，主操作（识别）推到右端 */
