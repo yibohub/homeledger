@@ -55,6 +55,10 @@
 生产库 27 笔全 AI 记账，8 条备注里 4 条带家人（老爸/老妈/红霞），全散落在 merchant/note 自由文本。注意「成员」有两套：账本成员=注册用户（权限维度，生产库 3 人各自独立账本）、拆分成员=splits 自由文本（分摊维度，从未用过）——家人称呼两套都不属于，缺的是「消费归属人」标签维度。AI 提示词已下发账本成员名单（ai.js buildUserPrompt）但输出端无成员字段可填（管线只产 type/amount/date/merchant/note/category/account/currency/confidence）。
 - [x] 方向已获维护者认可（2026-10-11），设计稿已立项 [ai-roadmap.md](ai-roadmap.md) §P11
 
+### 回导去重指纹不含归属人（PR #26 审查 P3 登记）
+导出 CSV 后只改归属人再回导，该行按指纹（日期|金额|商户）判重整体跳过——与分类/账户改后回导同款既有语义，非本批引入。
+- [ ] 触发即做：出现「回导更新字段」需求时，一并评估指纹是否纳入 type_key/归属人等机读列
+
 ### 关于页门面与 fork 身份不符（about.js）
 GITHUB_REPO 仍指上游 Panda-995/homeledger（反馈按钮跳转目标）、maintainerNote 写「由 Panda-995 维护」——本 fork 实为 yibohub 维护，README 已改而关于页未同步。
 - [ ] 触发即做：下次动关于页/反馈链路时，改 yibohub 口径（跳转目标变化需维护者确认指向 fork 还是保留上游）
