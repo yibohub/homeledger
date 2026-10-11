@@ -939,11 +939,14 @@ function normalizeItem(raw, ledgerId, { sourceText = '' } = {}) {
  * @param {number} o.ledgerId
  */
 /**
- * 敏感记账本地分流的判定词表（收入/资金类——出网敏感性分级里最高的一档）。
- * 刻意不含退款/红包：低敏高频，误伤成本大于收益。
- * 与 KEYWORD_RULES 收入段对齐但用途不同：那边是分类，这边是出网预检。
+ * 敏感记账本地分流的判定词表（方向无歧义的收入词——从窄）。
+ * 口径：误拦的代价是规则链错向 + 悬浮球自动入库错数据，漏拦的代价只是照旧出网（与现状
+ * 一致）——所以只收「见到即收入」的词；歧义资金词（裸利息/理财/赎回/报销/公积金等，
+ * 存在还贷利息、买理财、申请报销、还公积金贷款等支出用法）一律不拦、交给模型识别方向，
+ * 个别高敏正词组（存款利息/公积金提取/报销款/报销到账）单独收录。
+ * 与 KEYWORD_RULES 收入段对齐但用途分离：那边是分类，这边是出网预检。
  */
-const SENSITIVE_LOCAL_RE = /(工资|薪资|薪水|月薪|发薪|代发|年终奖|绩效|公积金|分红|股息|利息|结息|理财|赎回|房租收|收租|稿费|外快|兼职|理赔|报销)/i;
+const SENSITIVE_LOCAL_RE = /(工资|薪资|薪水|月薪|发薪|代发|奖金|年终奖|十三薪|年薪|绩效|稿费|外快|兼职|养老金|退休金|压岁钱|奖学金|劳务费|分红|股息|结息|存款利息|房租收|收租|理赔|赔付|公积金提取|报销款|报销到账)/i;
 
 async function analyzeBill({ images = [], text = '', ledgerId }) {
   const cfg = getAiConfig();
@@ -955,7 +958,7 @@ async function analyzeBill({ images = [], text = '', ledgerId }) {
   //    不发送模型服务，直接走本地规则链。截图路径不受控（图片无法本地内容过滤）。
   const sensitiveLocal = !images.length && text && cfg.sensitiveLocalOnly && SENSITIVE_LOCAL_RE.test(text);
   if (sensitiveLocal) {
-    warnings.push('含敏感信息（收入/资金类关键词），已用本地规则识别，内容未发送至模型服务（设置 → AI 记账可关闭此分流）。');
+    warnings.push('含敏感信息（收入类关键词），已用本地规则识别，内容未发送至模型服务（设置 → AI 记账可关闭此分流）。');
   }
 
   // 1) 有模型且（有图 or 想更聪明的文本解析）→ 走大模型

@@ -156,7 +156,7 @@ const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
       'ai.model': 'mock-guard', 'ai.vision': '1', 'ai.timeout_ms': '90000', 'ai.sensitive_local_only': '1',
     },
   });
-  check('开关默认持久化为开', dbGet('ai.sensitive_local_only') === 'true', dbGet('ai.sensitive_local_only'));
+  check('设置路由把开关持久化为开', dbGet('ai.sensitive_local_only') === 'true', dbGet('ai.sensitive_local_only'));
 
   // 开关 ON：敏感文本不出网
   const beforeSensitive = mockCalls;
@@ -192,7 +192,22 @@ const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
   check('关掉后敏感文本走模型（对比口径）', r.json?.engine === 'llm', `engine=${r.json?.engine}`);
   check('关掉后模型调用 +1', mockCalls === beforeSensitive + 2, `calls=${mockCalls - beforeSensitive}`);
 
-  mock.close();
+  // 重新开启（直接写库，路由持久化已在上文双向覆盖）：锁误拦回归与新词
+  db.setSetting('ai.sensitive_local_only', 'true');
+  r = await req('POST', '/api/ai/chat', { json: { text: '养老金 3500 到账' }, cookie });
+  check('新词覆盖（养老金）走规则且模型零调用', r.json?.engine === 'rule' && mockCalls === beforeSensitive + 2,
+    `engine=${r.json?.engine} calls=${mockCalls - beforeSensitive}`);
+  // 误拦回归（审查 P2-2）：歧义资金词不拦——拦了的代价是规则链错向 + 悬浮球自动入库错数据
+  r = await req('POST', '/api/ai/chat', { json: { text: '还房贷 5000 元 本金加利息' }, cookie });
+  check('歧义词（裸利息/房贷）不拦截，交给模型识别方向', r.json?.engine === 'llm', `engine=${r.json?.engine}`);
+  check('歧义不拦截模型调用 +1', mockCalls === beforeSensitive + 3, `calls=${mockCalls - beforeSensitive}`);
+  check('模型正确识别支出方向（不产生错向收入）',
+    (r.json.items || [])[0]?.type === 'expense', JSON.stringify((r.json.items || [])[0] || {}).slice(0, 120));
+  r = await req('POST', '/api/ai/chat', { json: { text: '买理财 10000 元' }, cookie });
+  check('歧义词（买理财）不拦截', r.json?.engine === 'llm' && mockCalls === beforeSensitive + 4,
+    `engine=${r.json?.engine} calls=${mockCalls - beforeSensitive}`);
+
+  await new Promise((res2) => mock.close(res2));
   db.setSetting('ai.enabled', 'false');
   db.setSetting('ai.base_url', '');
   db.setSetting('ai.model', '');

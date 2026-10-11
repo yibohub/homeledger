@@ -118,8 +118,9 @@
       </div>
       <label class="check mb8"><input type="checkbox" name="ai.sensitive_local_only" value="1" <%= cfg.sensitiveLocalOnly ? 'checked' : '' %>> 敏感记账走本地规则（推荐）</label>
       <div class="help" style="margin-top:-2px">
-        文字记账命中收入/资金类关键词（工资、公积金、理财、报销等）时，不发送模型服务、改用本地规则识别（识别提示会注明）。
-        截图识别不受此控制；关掉可对比识别质量。
+        文字记账命中收入类关键词（工资、奖金、养老金、报销款等）时，不发送模型服务、改用本地规则识别（识别提示会注明）。
+        词表从窄：歧义资金词（利息、理财、报销、公积金等支出用法）不拦、交给模型识别方向；
+        图文混合时文字随截图一并发送，查账问答也不受此控制。关掉可对比识别质量。
       </div>
       <div class="field" style="max-width:220px">
         <label>超时时间（毫秒）</label>
