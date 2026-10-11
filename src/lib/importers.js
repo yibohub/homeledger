@@ -8,7 +8,7 @@
  */
 const { all, get, run, tx, nowStr, todayStr, recalcBalances } = require('../db');
 const { parseAmountToCents, monthOf } = require('./util');
-const { classifyByKeywords, guessAccountName, resolveCategoryId, resolveAccountId } = require('./ai');
+const { classifyByKeywords, guessAccountName, resolveCategoryId, resolveAccountId, cleanOwnerLabel } = require('./ai');
 
 /* ------------------------------- 编码与 CSV ------------------------------- */
 
@@ -119,7 +119,7 @@ function normalizeRow({ date, direction, amountText, merchant, desc, categoryTex
     account_hint: accountText || guessAccountName(text) || null,
     to_account_hint: toAccountText || null,
     // 归属人（P11）：自家导出的「归属人」列回读；微信/支付宝原生账单无此列，恒空
-    owner_label: String(ownerText || '').replace(/[s　]+/g, '').trim().slice(0, 20) || null,
+    owner_label: cleanOwnerLabel(ownerText),
     order_no: orderNo || null,
   };
 }

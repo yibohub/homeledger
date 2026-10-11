@@ -232,7 +232,17 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   check('归属人统计聚合', ob.length >= 1 && ob[0].label === '老妈' && ob[0].cnt >= 2, JSON.stringify(ob));
   check('流水按归属人筛选', txnLib.listTransactions(ledgerId, { owner: '老妈' }).rows.length >= 2, '');
   check('归属人筛选清洗空白（「 老 妈 」→ 老妈）', txnLib.listTransactions(ledgerId, { owner: ' 老 妈 ' }).rows.length >= 2, '');
-  // 名单还原，不污染同库后续断言
+
+  /* --- 名单路由 HTTP（审查 P1 回归：分隔正则曾把字母 s 当分隔符，Rose 被劈开）--- */
+  r = await req('GET', '/members');
+  check('成员页渲染家庭名单卡片', r.status === 200 && r.text.includes('家庭成员（归属人）'), `HTTP ${r.status}`);
+  const fSaved2 = await req('POST', '/members/family', {
+    form: { _csrf: csrfOf(r.text), names: 'Rose、Alice、老妈' },
+  });
+  const famAfterPost = JSON.parse(db.getSetting(`family.members.${ledgerId}`, '[]'));
+  check('名单保存：含字母 s 的名字不被劈开（Rose 完整）',
+    fSaved2.status === 302 && famAfterPost.includes('Rose') && famAfterPost.includes('Alice') && famAfterPost.length === 3,
+    JSON.stringify(famAfterPost));
   db.setSetting(`family.members.${ledgerId}`, famSaved);
 
   console.log(`\n=== 结果：${pass} 通过 / ${fail} 失败 ===`);

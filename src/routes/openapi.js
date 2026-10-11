@@ -224,7 +224,7 @@ function readTxnBody(ledgerId, body, { createdAccounts = [] } = {}) {
     note: body.note || '',
     merchant: body.merchant || '',
     tags: body.tags || '',
-    owner_label: body.owner_label || body.for_member || null,
+    owner_label: body.owner_label ?? body.for_member ?? null,
     status: body.status === 'pending' ? 'pending' : 'cleared',
     is_reimbursable: body.is_reimbursable ? 1 : 0,
     splits,
@@ -255,7 +255,7 @@ router.get('/transactions/recent', (req, res) => {
   const { ledgerId } = req.openAuth;
   const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
   const rows = all(
-    `SELECT t.id, t.type, t.amount_cents, t.currency, t.txn_date, t.merchant, t.note, t.source, t.created_at,
+    `SELECT t.id, t.type, t.amount_cents, t.currency, t.txn_date, t.merchant, t.note, t.source, t.created_at, t.owner_label,
             c.name AS category_name, a.name AS account_name
      FROM transactions t
      LEFT JOIN categories c ON c.id = t.category_id
@@ -307,6 +307,7 @@ router.get('/transactions', (req, res) => {
       category: t.category_path, category_id: t.category_id,
       account: t.account_name, to_account: t.to_account_name,
       member: t.member_name, tags: t.tag_names, status: t.status,
+      owner_label: t.owner_label || null,
       is_reimbursable: !!t.is_reimbursable, reimbursed_at: t.reimbursed_at,
       source: t.source, attachment_count: t.attachment_count || 0,
       images: (imgMap.get(Number(t.id)) || []).map((i) => ({ id: i.id, path: `/uploads/${i.rel_path}`, size: i.size })),
@@ -555,6 +556,7 @@ router.post('/transactions/:id', requireWrite, (req, res) => {
       tags: body.tags ?? old.tag_names ?? '',
       status: body.status ?? old.status,
       is_reimbursable: body.is_reimbursable ?? !!old.is_reimbursable,
+      owner_label: body.owner_label ?? body.for_member ?? old.owner_label ?? null,
       splits: body.splits,
     };
     const txnId = txn.updateTransaction(id, ledgerId, userId, readTxnBody(ledgerId, merged, { createdAccounts }));
@@ -659,6 +661,7 @@ router.post('/ai/bill', requireWrite, async (req, res) => {
           merchant: it.merchant || '',
           tags: it.tags || '',
           is_reimbursable: it.is_reimbursable ? 1 : 0,
+          owner_label: it.owner_label || null,
           source: 'api_open_ai',
           ai_json: JSON.stringify(it.raw || it).slice(0, 4000),
         });

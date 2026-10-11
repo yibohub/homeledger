@@ -479,9 +479,9 @@
             '<div class="field"><label>账户' + (it.account_recommended ? ' <span class="ai-hint">按习惯推荐</span>' : '') + '</label><select class="d-account"></select></div>' +
             '<div class="field"><label>商家</label><input type="text" class="d-merchant" value="' + esc(it.merchant || '') + '"></div>' +
             '<div class="field" style="flex:2"><label>备注</label><input type="text" class="d-note" value="' + esc(it.note || '') + '"></div>' +
-            '<div class="field"><label>归属人' + (it.owner_recommended ? ' <span class="ai-hint">按习惯推荐</span>' : '') + '</label><input type="text" class="d-owner" list="ai-owner-list" value="' + esc(it.owner_label || '') + '" placeholder="为谁花，可留空"></div>' +
+            '<div class="field"><label>归属人' + (it.owner_recommended ? ' <span class="ai-hint">按习惯推荐</span>' : '') + '</label><input type="text" class="d-owner" list="ai-owner-list-' + i + '" value="' + esc(it.owner_label || '') + '" placeholder="为谁花，可留空"></div>' +
           '</div>' +
-          '<datalist id="ai-owner-list">' + (window.__AI_FAMILY__ || []).concat(it.owner_label ? [it.owner_label] : []).filter(function(v, i, a) { return v && a.indexOf(v) === i; }).map(function(n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist>',
+          '<datalist id="ai-owner-list-' + i + '">' + (window.__AI_FAMILY__ || []).concat(it.owner_label ? [it.owner_label] : []).filter(function(v, i, a) { return v && a.indexOf(v) === i; }).map(function(n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist>',
         '</div>';
       });
       html += '<div class="row mt16"><button type="submit" class="btn btn-primary btn-lg" id="ai-save">确认并保存 ' + data.items.length + ' 笔</button>' +
@@ -584,7 +584,7 @@
           if (res.items.length === 1) { window.location.href = url; return; }
           // 多笔：走草稿确认
           lastScanIds = [];
-          renderDrafts({ items: res.items, engine: res.engine, warnings: res.warnings || [] });
+          renderDrafts({ items: res.items, engine: res.engine, warnings: res.warnings || [], family: res.family });
         } finally {
           // finally 复原：postJson 网络层异常会抛出，缺这层断网时按钮会永久禁用
           quickBtn.disabled = false;

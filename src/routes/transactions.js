@@ -59,7 +59,7 @@ router.get('/', auth.requireLogin, (req, res) => {
     categoryId: req.query.category_id ? Number(req.query.category_id) : null,
     accountId: req.query.account_id ? Number(req.query.account_id) : null,
     memberId: req.query.member_id ? Number(req.query.member_id) : null,
-    owner: req.query.owner ? String(req.query.owner).slice(0, 20) : '',
+    owner: req.query.owner ? String(req.query.owner).replace(/[\s\u3000]+/g, '').slice(0, 20) : '',
     tagId: req.query.tag_id ? Number(req.query.tag_id) : null,
     source: req.query.source || '',
     month: req.query.month || '',

@@ -425,12 +425,12 @@
     const ownerIn = document.createElement('input');
     ownerIn.type = 'text';
     ownerIn.className = 'm-draft-acc';
-    ownerIn.setAttribute('list', 'm-owner-list');
+    ownerIn.setAttribute('list', 'm-owner-list-' + (it.draft_id || Math.random().toString(36).slice(2)));
     ownerIn.placeholder = '为谁花（可留空）';
     ownerIn.value = it.owner_label || '';
     const ownerRow = fieldRow('归属人' + (it.owner_recommended ? '（推荐）' : ''), ownerIn);
     const dl = document.createElement('datalist');
-    dl.id = 'm-owner-list';
+    dl.id = ownerIn.getAttribute('list');
     for (const name of family) {
       const o = document.createElement('option');
       o.value = name;

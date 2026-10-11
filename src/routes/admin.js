@@ -428,7 +428,7 @@ router.get('/members', auth.requireLogin, (req, res) => {
 router.post('/members/family', auth.requireLogin, auth.requireLedgerManage, (req, res) => {
   const ledgerId = Number(res.locals.ledger.id);
   const names = String(req.body.names || '')
-    .split(/[、,，;；s]+/)
+    .split(/[、,，;；\s]+/)
     .map((n) => n.trim())
     .filter(Boolean)
     .slice(0, 30);
