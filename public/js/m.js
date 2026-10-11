@@ -249,6 +249,11 @@
       } else if (!data.items || !data.items.length) {
         say('warn', '没有识别到内容，试试「午饭 35 元」或拍一张账单');
       } else {
+        // 警示（如敏感分流的「未发送至模型服务」）必须让草稿卡带着：say 会持续到下一次
+        // 识别（clearSay 在提交时才清），草稿停在页面上多久提示就在多久
+        if (Array.isArray(data.warnings) && data.warnings.length) {
+          say('warn', '⚠ ' + data.warnings.join('；'));
+        }
         renderDrafts(data, (data.images || []).map((s) => s.id));
         textEl.value = '';
         textEl.style.height = 'auto';

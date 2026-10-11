@@ -138,10 +138,14 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   check('m.js 备注必展示可改 + 确认时携带编辑值', js.status === 200 && js.text.includes('item.note = noteIn.value.trim()')
     && js.text.includes('item.merchant = merchIn.value.trim()') && js.text.includes('item.owner_label = ownerIn.value.trim() || null'), '');
   check('m.js 草稿确认带推荐快照（P12 反馈信号，编辑前留档）', js.status === 200 && js.text.includes('rec_snapshot'), '');
+  check('m.js 草稿分支渲染警示（敏感分流提示随 say 持续到下次识别，不再无提示）',
+    js.status === 200 && (js.text.match(/data\.warnings/g) || []).length >= 2, '');
   const djs = await req('GET', '/static/js/app.js', { ua: DESKTOP_UA });
   check('桌面 AI 页文字快记同分流（问句出回答不建草稿）', djs.status === 200 && djs.text.includes("res.mode === 'answer'"), `HTTP ${djs.status}`);
   check('桌面草稿确认带推荐快照（P12 反馈信号，按卡片索引回取编辑前原值）',
     djs.status === 200 && djs.text.includes('rec_snapshot') && djs.text.includes('__drafts'), `HTTP ${djs.status}`);
+  check('桌面单笔跳转携带警示（sessionStorage 存 hl_ai_warn，表单页持久渲染）',
+    djs.status === 200 && djs.text.includes('hl_ai_warn') && djs.text.includes('initAiWarnFlash'), `HTTP ${djs.status}`);
   check('桌面文字快记也有 busy 反馈 + finally 复原（断网不卡死按钮）',
     djs.status === 200 && djs.text.includes('识别中…') && /quickBtn\.textContent = oldLabel/.test(djs.text)
       && djs.text.includes('quickBtn.disabled = false'), '');
@@ -174,6 +178,13 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   check('草稿接口下发归属人候选名单（family）', Array.isArray(r.json.family), JSON.stringify(r.json.family));
   const draft = r.json.items[0];
   check('草稿带分类与金额（规则引擎）', Number(draft.amount_cents) === 3500 && !!draft.category_id, JSON.stringify({ a: draft.amount_cents, c: draft.category_id }));
+  // 维护者实测实例（敏感分流提示三入口可见性）：极简草稿路径的响应必须带警示，前端才有的渲染
+  r = await req('POST', '/api/ai/text', { json: { text: '十月工资收入5000元' }, ua: PHONE_UA });
+  check('敏感实例（十月工资收入5000元）走规则且响应带未出网警示',
+    r.status === 200 && r.json.engine === 'rule'
+      && (r.json.warnings || []).some((w) => w.includes('未发送至模型服务'))
+      && r.json.items?.[0]?.type === 'income' && Number(r.json.items[0].amount_cents) === 500000,
+    `engine=${r.json?.engine} warn=${(r.json?.warnings || []).length}`);
   if (!draft.account_id) draft.account_id = accs[0].id; // 与 m.js 草稿卡片同行为：缺账户时下拉默认第一项
   r = await req('POST', '/api/ai/confirm', { json: { items: [draft], source: 'ai_screenshot' }, ua: PHONE_UA });
   check('确认后入库', r.status === 200 && r.json.ok === true && r.json.created === 1, `HTTP ${r.status} ${r.text.slice(0, 80)}`);
