@@ -10,6 +10,7 @@
     <% [['month','本月'],['quarter','本季度'],['year','本年'],['all','全部']].forEach(function(p){ %>
       <a class="chip <%= range.preset === p[0] ? 'primary' : '' %>" href="/reports?preset=<%= p[0] %><%= range.month ? '&month=' + range.month : '' %>"><%= p[1] %></a>
     <% }); %>
+    <a class="chip" href="/annual">📅 年度账单</a>
     <form method="get" action="/reports" class="row" style="gap:6px">
       <input type="hidden" name="preset" value="month">
       <input type="month" name="month" value="<%= range.month || today.slice(0,7) %>" style="width:auto">

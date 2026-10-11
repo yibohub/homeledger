@@ -517,7 +517,7 @@ router.get('/import', auth.requireLogin, auth.requireLedgerWrite, (req, res) => 
   res.render('import', { title: '账单导入', activeNav: 'import', jobs, accounts, preview: null, token: null });
 });
 
-router.post('/api/import/preview', auth.requireLogin, auth.requireLedgerWrite, (req, res) => {
+router.post('/api/import/preview', auth.requireLogin, auth.requireLedgerWrite, async (req, res) => {
   const ledgerId = Number(res.locals.ledger.id);
   try {
     const { dataUrl, fileName } = req.body;
@@ -528,6 +528,9 @@ router.post('/api/import/preview', auth.requireLogin, auth.requireLedgerWrite, (
     const parsed = importer.parseBill(buf);
     if (parsed.error) return res.status(400).json({ ok: false, error: parsed.error });
 
+    // P8 导入兜底分类：词表/习惯（零 token）先行，仍未定的唯一商户批量给模型（失败静默，行为同现状）
+    const enriched = await ai.enrichImportCategories(ledgerId, parsed.records);
+
     const token = u.uid(24);
     previewCache.set(token, {
       records: parsed.records, neutralRecords: parsed.neutralRecords || [],
@@ -536,8 +539,13 @@ router.post('/api/import/preview', auth.requireLogin, auth.requireLedgerWrite, (
     });
 
     const cats = fd.flatCategories(ledgerId);
+    const SOURCE_LABEL = { dict: '词表', habit: '习惯', ai: 'AI' };
     const guessCat = (r) => {
       if (r.neutral) return '账户间转账（不计收支）';
+      if (r.category_id) {
+        const path = cats.find((c) => Number(c.id) === Number(r.category_id))?.path;
+        return path ? `${path}（${SOURCE_LABEL[r.category_source] || '推荐'}）` : path || r.category_hint || '';
+      }
       const kind = r.type === 'income' ? 'income' : 'expense';
       const direct = r.category_hint ? ai.resolveCategoryId(ledgerId, r.category_hint, kind) : null;
       if (direct) return cats.find((c) => Number(c.id) === Number(direct))?.path || r.category_hint;
