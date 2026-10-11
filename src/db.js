@@ -423,6 +423,18 @@ CREATE TABLE IF NOT EXISTS api_tokens (
   revoked_at   TEXT,
   created_at   TEXT NOT NULL
 );
+
+-- P12 习惯反馈闭环：草稿确认时「推荐被改掉」的负反馈账本（recommended/confirmed 统一存字符串：id 或归属人标签）
+CREATE TABLE IF NOT EXISTS habit_feedback (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  ledger_id   INTEGER NOT NULL,
+  merchant    TEXT NOT NULL,
+  field       TEXT NOT NULL,
+  recommended TEXT NOT NULL,
+  confirmed   TEXT,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_habit_feedback_lookup ON habit_feedback(ledger_id, merchant, field);
 `);
 
 /* ----------------------------- 增量迁移（幂等） ----------------------------- */

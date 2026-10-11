@@ -61,6 +61,8 @@ router.get('/settings', auth.requireLogin, (req, res) => {
     isAdmin,
     newToken,
     admin: adminData,
+    // P13 个人词表：本账本沉淀的「商户→分类」稳定映射，设置页可查看可删除（可解释、可遗忘）
+    dictEntries: res.locals.ledger ? require('../lib/dict').listActive(Number(res.locals.ledger.id)) : [],
     apiTokens: all(
       `SELECT id, name, token_tail, last_used_at, created_at FROM api_tokens
        WHERE user_id = ? AND revoked_at IS NULL ORDER BY id DESC`,
@@ -209,6 +211,21 @@ router.get('/theme/:mode', auth.requireLogin, (req, res) => {
   const mode = req.params.mode === 'dark' ? 'dark' : 'light';
   run('UPDATE users SET theme = ? WHERE id = ?', mode, req.session.userId);
   res.redirect(req.get('referer') || '/');
+});
+
+/* ------------------------- P13 个人词表：逐条删除 ------------------------- */
+
+// 词表是账本级共享数据且删除后永不自动复活（dismissed），对齐家庭名单同款管理权限；
+// 只读成员仍可在设置页查看（可解释），但不能单方面改全家的推荐行为
+router.post('/settings/dict/delete', auth.requireLogin, auth.requireLedgerManage, (req, res) => {
+  const ledger = res.locals.ledger;
+  if (!ledger) return res.redirect('/settings#ai');
+  const kw = String(req.body.kw || '').slice(0, 60);
+  const kind = req.body.kind === 'income' ? 'income' : 'expense';
+  if (require('../lib/dict').dismiss(Number(ledger.id), kw, kind)) {
+    auth.audit(req, 'dict.dismiss', { ledgerId: Number(ledger.id), detail: `删除词表映射 ${kw}（${kind}）` });
+  }
+  res.redirect('/settings#ai');
 });
 
 router.post('/settings/ai', auth.requireLogin, require('../lib/auth').requireAdmin, async (req, res) => {

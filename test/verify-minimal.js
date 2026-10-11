@@ -137,8 +137,11 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
     && js.text.includes("noteIn.placeholder = '备注'") && js.text.includes("ownerIn.value = it.owner_label || ''"), '');
   check('m.js 备注必展示可改 + 确认时携带编辑值', js.status === 200 && js.text.includes('item.note = noteIn.value.trim()')
     && js.text.includes('item.merchant = merchIn.value.trim()') && js.text.includes('item.owner_label = ownerIn.value.trim() || null'), '');
+  check('m.js 草稿确认带推荐快照（P12 反馈信号，编辑前留档）', js.status === 200 && js.text.includes('rec_snapshot'), '');
   const djs = await req('GET', '/static/js/app.js', { ua: DESKTOP_UA });
   check('桌面 AI 页文字快记同分流（问句出回答不建草稿）', djs.status === 200 && djs.text.includes("res.mode === 'answer'"), `HTTP ${djs.status}`);
+  check('桌面草稿确认带推荐快照（P12 反馈信号，按卡片索引回取编辑前原值）',
+    djs.status === 200 && djs.text.includes('rec_snapshot') && djs.text.includes('__drafts'), `HTTP ${djs.status}`);
   check('桌面文字快记也有 busy 反馈 + finally 复原（断网不卡死按钮）',
     djs.status === 200 && djs.text.includes('识别中…') && /quickBtn\.textContent = oldLabel/.test(djs.text)
       && djs.text.includes('quickBtn.disabled = false'), '');

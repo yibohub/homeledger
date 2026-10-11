@@ -5,8 +5,9 @@
  *  2) 规则解析：未配置 Key 时兜底，纯本地、零依赖，仍能识别常见账单文本
  * 输出统一为「账单草稿」结构，交给用户确认后再落库。
  */
-const { all, get, getSetting, setSetting, todayStr } = require('../db');
+const { all, get, run, getSetting, setSetting, todayStr, nowStr } = require('../db');
 const { parseAmountToCents, uid, pad } = require('./util');
+const dict = require('./dict');
 
 /* -------------------------------- 配置读取 -------------------------------- */
 
@@ -443,17 +444,24 @@ function familyMembers(ledgerId, { limit = 30, manualOnly = false } = {}) {
   return out;
 }
 
-/** 商户→归属人习惯（与 habitCategoryId 同款窗口与阈值） */
+/** 商户→归属人习惯（与 habitCategoryId 同款窗口；P12 起负反馈加权，w≥2 才算习惯） */
 function habitOwnerId(ledgerId, merchant) {
   if (!merchant) return null;
+  const since = habitSince();
   const r = get(
-    `SELECT owner_label AS label, COUNT(*) AS cnt FROM transactions
-     WHERE ledger_id = ? AND deleted_at IS NULL AND merchant = ? AND txn_date >= ?
-       AND owner_label IS NOT NULL AND owner_label != ''
-     GROUP BY owner_label ORDER BY cnt DESC LIMIT 1`,
-    ledgerId, String(merchant).slice(0, 60), habitSince()
+    `SELECT t.owner_label AS label, COUNT(*) - 2 * COALESCE(f.neg, 0) AS w
+     FROM transactions t
+     LEFT JOIN (SELECT recommended AS rid, COUNT(*) AS neg FROM habit_feedback
+                WHERE ledger_id = ? AND merchant = ? AND field = 'owner' AND created_at >= ?
+                GROUP BY recommended) f ON f.rid = t.owner_label
+     WHERE t.ledger_id = ? AND t.deleted_at IS NULL AND t.merchant = ? AND t.txn_date >= ?
+       AND t.owner_label IS NOT NULL AND t.owner_label != ''
+     GROUP BY t.owner_label HAVING w >= 2
+     ORDER BY w DESC LIMIT 1`,
+    ledgerId, String(merchant).slice(0, 60), since,
+    ledgerId, String(merchant).slice(0, 60), since
   );
-  return r && Number(r.cnt) >= 2 ? r.label : null;
+  return r ? r.label : null;
 }
 
 /**
@@ -483,17 +491,21 @@ function buildHabitSummary(ledgerId) {
     .sort((x, y) => y.cnt - x.cnt).slice(0, 6)
     .map((r) => `${pathOf(r)}→${r.aname}`);
 
+  // P12：商户→分类摘要同款负反馈加权（被改掉的映射不再教模型），w 为负自然被 ≥2 过滤
   const merchRows = all(
-    `SELECT t.merchant, c.name AS cname, p.name AS parent, COUNT(*) AS cnt
+    `SELECT t.merchant, c.name AS cname, p.name AS parent, COUNT(*) - 2 * COALESCE(f.neg, 0) AS cnt
      FROM transactions t
      JOIN categories c ON c.id = t.category_id AND c.is_archived = 0
      LEFT JOIN categories p ON p.id = c.parent_id
+     LEFT JOIN (SELECT merchant AS fm, recommended AS rid, COUNT(*) AS neg FROM habit_feedback
+                WHERE ledger_id = ? AND field = 'category' AND created_at >= ?
+                GROUP BY merchant, recommended) f ON f.fm = t.merchant AND CAST(f.rid AS INTEGER) = t.category_id
      WHERE t.ledger_id = ? AND t.deleted_at IS NULL AND t.txn_date >= ?
        AND t.merchant IS NOT NULL AND t.merchant != '' AND t.category_id IS NOT NULL
        AND t.type IN ('expense','income')
      GROUP BY t.merchant, t.category_id
      ORDER BY t.merchant, cnt DESC`,
-    ledgerId, since
+    ledgerId, since, ledgerId, since
   );
   const topCatByMerch = new Map();
   for (const r of merchRows) if (!topCatByMerch.has(r.merchant)) topCatByMerch.set(r.merchant, r);
@@ -502,12 +514,17 @@ function buildHabitSummary(ledgerId) {
     .map((r) => `${r.merchant}→${pathOf(r)}`);
 
   // 商户→归属人（P11）：「口腔医院→老妈」这类稳定跟随关系，供模型源头对齐 + normalizeItem 兜底
+  // P12：同款负反馈加权（推荐归属人被改掉的映射扣 2 分，w≥2 才进摘要）
   const ownerRows = all(
-    `SELECT merchant, owner_label, COUNT(*) AS cnt FROM transactions
-     WHERE ledger_id = ? AND deleted_at IS NULL AND txn_date >= ?
-       AND merchant IS NOT NULL AND merchant != '' AND owner_label IS NOT NULL AND owner_label != ''
-     GROUP BY merchant, owner_label ORDER BY cnt DESC`,
-    ledgerId, since
+    `SELECT t.merchant, t.owner_label, COUNT(*) - 2 * COALESCE(f.neg, 0) AS cnt
+     FROM transactions t
+     LEFT JOIN (SELECT merchant AS fm, recommended AS rid, COUNT(*) AS neg FROM habit_feedback
+                WHERE ledger_id = ? AND field = 'owner' AND created_at >= ?
+                GROUP BY merchant, recommended) f ON f.fm = t.merchant AND f.rid = t.owner_label
+     WHERE t.ledger_id = ? AND t.deleted_at IS NULL AND t.txn_date >= ?
+       AND t.merchant IS NOT NULL AND t.merchant != '' AND t.owner_label IS NOT NULL AND t.owner_label != ''
+     GROUP BY t.merchant, t.owner_label ORDER BY cnt DESC`,
+    ledgerId, since, ledgerId, since
   );
   const topOwnerByMerch = new Map();
   for (const r of ownerRows) if (!topOwnerByMerch.has(r.merchant)) topOwnerByMerch.set(r.merchant, r);
@@ -636,29 +653,39 @@ function habitSince(today = todayStr()) {
 function habitAccountId(ledgerId, { categoryId = null, merchant = null, type = 'expense' } = {}) {
   const since = habitSince();
   // 排除已归档账户：归档后用户在确认页/账户页都看不到它，习惯若还往里记账就成了「隐形流水」
-  const base = `FROM transactions
-    WHERE ledger_id = ? AND deleted_at IS NULL AND account_id IS NOT NULL
-      AND account_id NOT IN (SELECT id FROM accounts WHERE ledger_id = ? AND is_archived = 1)
-      AND type = ? AND txn_date >= ?`;
+  // P12：商户维度带负反馈加权（推荐账户被改一次扣 2 分，w<1 出局）；分类/全局维度无反馈归属不加权
+  const base = `FROM transactions t
+    WHERE t.ledger_id = ? AND t.deleted_at IS NULL AND t.account_id IS NOT NULL
+      AND t.account_id NOT IN (SELECT id FROM accounts WHERE ledger_id = ? AND is_archived = 1)
+      AND t.type = ? AND t.txn_date >= ?`;
   if (categoryId) {
     const row = get(
-      `SELECT account_id ${base} AND category_id = ?
-       GROUP BY account_id ORDER BY COUNT(*) DESC, MAX(txn_date) DESC, MAX(id) DESC LIMIT 1`,
+      `SELECT t.account_id ${base} AND t.category_id = ?
+       GROUP BY t.account_id ORDER BY COUNT(*) DESC, MAX(t.txn_date) DESC, MAX(t.id) DESC LIMIT 1`,
       ledgerId, ledgerId, type, since, categoryId
     );
     if (row) return Number(row.account_id);
   }
   if (merchant) {
     const row = get(
-      `SELECT account_id ${base} AND merchant = ?
-       GROUP BY account_id ORDER BY COUNT(*) DESC, MAX(txn_date) DESC, MAX(id) DESC LIMIT 1`,
+      `SELECT t.account_id, COUNT(*) - 2 * COALESCE(f.neg, 0) AS w
+       FROM transactions t
+       LEFT JOIN (SELECT recommended AS rid, COUNT(*) AS neg FROM habit_feedback
+                  WHERE ledger_id = ? AND merchant = ? AND field = 'account' AND created_at >= ?
+                  GROUP BY recommended) f ON CAST(f.rid AS INTEGER) = t.account_id
+       WHERE t.ledger_id = ? AND t.deleted_at IS NULL AND t.account_id IS NOT NULL
+         AND t.account_id NOT IN (SELECT id FROM accounts WHERE ledger_id = ? AND is_archived = 1)
+         AND t.type = ? AND t.txn_date >= ? AND t.merchant = ?
+       GROUP BY t.account_id HAVING w >= 1
+       ORDER BY w DESC, MAX(t.txn_date) DESC, MAX(t.id) DESC LIMIT 1`,
+      ledgerId, String(merchant).slice(0, 60), since,
       ledgerId, ledgerId, type, since, String(merchant).slice(0, 60)
     );
     if (row) return Number(row.account_id);
   }
   const row = get(
-    `SELECT account_id ${base}
-     GROUP BY account_id ORDER BY COUNT(*) DESC, MAX(txn_date) DESC, MAX(id) DESC LIMIT 1`,
+    `SELECT t.account_id ${base}
+     GROUP BY t.account_id ORDER BY COUNT(*) DESC, MAX(t.txn_date) DESC, MAX(t.id) DESC LIMIT 1`,
     ledgerId, ledgerId, type, since
   );
   return row ? Number(row.account_id) : null;
@@ -667,18 +694,76 @@ function habitAccountId(ledgerId, { categoryId = null, merchant = null, type = '
 /**
  * 习惯推荐分类：同商户近 90 天最常用分类（商户名精确匹配）。
  * 只在分类名匹配与关键词表都猜不中时兜底，让「肯德基 → 餐饮/外卖」这类映射以用户自己的记法为准。
+ * P12 起负反馈加权：草稿确认时推荐分类被改一次扣 2 分，weight<1 的映射出局（学错的模式退火）。
  */
 function habitCategoryId(ledgerId, merchant, type = 'expense') {
   if (!merchant) return null;
+  const since = habitSince();
   const row = get(
-    `SELECT category_id FROM transactions
-     WHERE ledger_id = ? AND deleted_at IS NULL AND category_id IS NOT NULL
-       AND category_id NOT IN (SELECT id FROM categories WHERE is_archived = 1 AND (ledger_id = ? OR ledger_id IS NULL))
-       AND merchant = ? AND type = ? AND txn_date >= ?
-     GROUP BY category_id ORDER BY COUNT(*) DESC, MAX(txn_date) DESC, MAX(id) DESC LIMIT 1`,
-    ledgerId, ledgerId, String(merchant).slice(0, 60), type, habitSince()
+    `SELECT t.category_id, COUNT(*) - 2 * COALESCE(f.neg, 0) AS w
+     FROM transactions t
+     LEFT JOIN (SELECT recommended AS rid, COUNT(*) AS neg FROM habit_feedback
+                WHERE ledger_id = ? AND merchant = ? AND field = 'category' AND created_at >= ?
+                GROUP BY recommended) f ON CAST(f.rid AS INTEGER) = t.category_id
+     WHERE t.ledger_id = ? AND t.deleted_at IS NULL AND t.category_id IS NOT NULL
+       AND t.category_id NOT IN (SELECT id FROM categories WHERE is_archived = 1 AND (ledger_id = ? OR ledger_id IS NULL))
+       AND t.merchant = ? AND t.type = ? AND t.txn_date >= ?
+     GROUP BY t.category_id HAVING w >= 1
+     ORDER BY w DESC, MAX(t.txn_date) DESC, MAX(t.id) DESC LIMIT 1`,
+    ledgerId, String(merchant).slice(0, 60), since,
+    ledgerId, ledgerId, String(merchant).slice(0, 60), type, since
   );
   return row ? Number(row.category_id) : null;
+}
+
+/**
+ * P12 习惯反馈闭环：草稿确认时比对「识别推荐快照」与最终值，被改掉的字段记一次负反馈。
+ * 快照 rec_snapshot{category_id, account_id, owner_label} 由前端在应用用户编辑之前写入
+ * （m.js 展开草稿时、app.js 提交时按卡片索引回取）；没带快照（旧缓存 JS）自然跳过。
+ * 只有「推荐过且有值」的字段被改才记（把「其他兜底换成真分类」不当惩罚）；清空也算改。
+ * 类别推荐的反馈同时联动 P13 词表扣分。任何失败不影响入库。
+ */
+function recordDraftFeedback(ledgerId, items) {
+  let rows = 0;
+  try {
+    const normId = (v) => {
+      if (v === null || v === undefined || String(v).trim() === '') return '';
+      const n = Number(v);
+      return Number.isFinite(n) ? String(n) : String(v).trim();
+    };
+    const normOwner = (v) => (v === null || v === undefined ? '' : String(v).trim().slice(0, 20));
+    for (const it of (items || [])) {
+      const snap = it && it.rec_snapshot;
+      if (!snap) continue;
+      const merchant = String(it.merchant || '').trim().slice(0, 60);
+      if (!merchant) continue;
+      // 类型被改（支出↔收入）时分类/账户跨 kind 比对没有意义，只比归属人（与类型无关）
+      const typeChanged = snap.type && it.type && String(snap.type) !== String(it.type);
+      const pairs = typeChanged
+        ? [['owner', normOwner(snap.owner_label), normOwner(it.owner_label)]]
+        : [
+            ['category', normId(snap.category_id), normId(it.category_id)],
+            ['account', normId(snap.account_id), normId(it.account_id)],
+            ['owner', normOwner(snap.owner_label), normOwner(it.owner_label)],
+          ];
+      for (const [field, rec, fin] of pairs) {
+        if (!rec || rec === fin) continue;
+        run(
+          'INSERT INTO habit_feedback (ledger_id, merchant, field, recommended, confirmed, created_at) VALUES (?,?,?,?,?,?)',
+          ledgerId, merchant, field, rec, fin, nowStr()
+        );
+        rows += 1;
+        if (field === 'category') dict.demote(ledgerId, merchant, Number(rec));
+      }
+    }
+    if (rows) {
+      // 反馈只在 90 天习惯窗内起作用，保留双窗（180 天）后清掉，防表无限膨胀
+      run('DELETE FROM habit_feedback WHERE created_at < ?', nowStr(new Date(Date.now() - 180 * 86400000)));
+    }
+  } catch (e) {
+    console.error('[ai] 习惯反馈记录失败（不影响入库）:', e.message);
+  }
+  return rows;
 }
 
 /** 规范化单条草稿；sourceText 给出时（纯文字识别），模型给的账户需在原文中有依据，否则交给习惯推荐 */
@@ -690,15 +775,24 @@ function normalizeItem(raw, ledgerId, { sourceText = '' } = {}) {
     : parseAmountToCents(raw.amount);
   const merchant = raw.merchant ? String(raw.merchant).trim().slice(0, 60) : null;
   const catName = raw.category_name || raw.category || null;
-  let categoryId = resolveCategoryId(ledgerId, catName, kind);
+  // P13 词表优先级：规则引擎的 category_name 出自系统关键词表（同为统计猜测），词表
+  // （用户自己的记法）优先于它；大模型读账单后明确给出的分类名是识别结果，仍优先于词表
+  const dictFirst = type !== 'transfer' && (raw.engine === 'rule' || !catName);
+  let categoryId = dictFirst ? null : resolveCategoryId(ledgerId, catName, kind);
   let categoryRecommended = false;
   if (!categoryId && type !== 'transfer') {
-    const kw = classifyByKeywords(`${raw.merchant || ''} ${raw.note || ''} ${catName || ''}`);
-    if (kw) categoryId = resolveCategoryId(ledgerId, kw.category, kw.kind === 'income' ? 'income' : kind);
+    const hay = `${raw.merchant || ''} ${raw.note || ''} ${catName || ''}`;
+    // P13 个人词表：本账本沉淀的「商户→分类」稳定映射，优先于全体用户共享的系统关键词表
+    const dictHit = dict.lookup(ledgerId, merchant, hay, kind);
+    if (dictHit) { categoryId = Number(dictHit.category_id); categoryRecommended = true; }
     if (!categoryId) {
-      // 关键词表兜底失败 → 用户自己的商户历史优先于「其他」
-      categoryId = habitCategoryId(ledgerId, merchant, kind);
-      if (categoryId) categoryRecommended = true;
+      const kw = classifyByKeywords(hay);
+      if (kw) categoryId = resolveCategoryId(ledgerId, kw.category, kw.kind === 'income' ? 'income' : kind);
+      if (!categoryId) {
+        // 关键词表兜底失败 → 用户自己的商户历史优先于「其他」
+        categoryId = habitCategoryId(ledgerId, merchant, kind);
+        if (categoryId) categoryRecommended = true;
+      }
     }
     if (!categoryId) categoryId = resolveCategoryId(ledgerId, kind === 'income' ? '其他收入' : '其他支出', kind);
   }
@@ -900,7 +994,7 @@ module.exports = {
   classifyByKeywords, guessAccountName, parseDateWords, parseTextByRules,
   resolveCategoryId, resolveAccountId, normalizeItem, buildContext,
   habitAccountId, habitCategoryId, buildHabitSummary, buildUserPrompt,
-  familyMembers, habitOwnerId, cleanOwnerLabel,
+  familyMembers, habitOwnerId, cleanOwnerLabel, recordDraftFeedback,
   extractAmount, cleanMerchant, callModel, listModels, guessVision, extractJson,
   isHeaderSafe, isMaskedSecret, sanitizeSecret,
 };

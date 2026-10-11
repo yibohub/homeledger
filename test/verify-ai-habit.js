@@ -23,6 +23,7 @@ if (!process.env.DATA_DIR) {
 const db = require('../src/db');
 const txnLib = require('../src/lib/txn');
 const aiLib = require('../src/lib/ai');
+const dictLib = require('../src/lib/dict');
 
 let pass = 0, fail = 0;
 function check(name, ok, detail = '') {
@@ -244,6 +245,215 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
     fSaved2.status === 302 && famAfterPost.includes('Rose') && famAfterPost.includes('Alice') && famAfterPost.length === 3,
     JSON.stringify(famAfterPost));
   db.setSetting(`family.members.${ledgerId}`, famSaved);
+
+  /* --- H. P13 个人词表：沉淀 / 优先于系统表 / 可删除 / 防复活 --- */
+  const gasKw = aiLib.classifyByKeywords('煤气站 80元');
+  const gasCat = gasKw && aiLib.resolveCategoryId(ledgerId, gasKw.category, 'expense');
+  check('「煤气站」命中系统关键词表（燃气费，词表优先级的前提）', !!gasCat, gasKw && gasKw.category);
+  if (gasCat) {
+    r = await req('POST', '/api/ai/text', { json: { text: '煤气站 80元' }, cookie });
+    const itH0 = (r.json.items || [])[0] || {};
+    check('无词表时系统关键词给燃气费', Number(itH0.category_id) === Number(gasCat) && !itH0.category_recommended,
+      `category_id=${itH0.category_id}`);
+
+    const merchantD = aiLib.cleanMerchant('煤气站 80元');
+    for (let i = 0; i < 3; i++) {
+      // 走手动记账路由：同时覆盖「POST /transactions 触发沉淀」的挂点
+      await req('POST', '/transactions', {
+        cookie, form: {
+          _csrf: csrf, type: 'expense', amount: '80', account_id: String(alipay.id), category_id: String(fruitCat),
+          txn_date: db.todayStr(), merchant: merchantD, note: '',
+        },
+      });
+    }
+    const dictRows0 = dictLib.listActive(ledgerId);
+    check('3 笔稳定映射自动沉淀个人词表（商户→水果）',
+      dictRows0.some((e) => e.kw === merchantD && Number(e.category_id) === Number(fruitCat) && e.hits === 3),
+      JSON.stringify(dictRows0));
+
+    r = await req('POST', '/api/ai/text', { json: { text: '煤气站 80元' }, cookie });
+    const itH1 = (r.json.items || [])[0] || {};
+    check('个人词表优先于系统关键词表（煤气站→水果而非燃气费）',
+      Number(itH1.category_id) === Number(fruitCat) && itH1.category_recommended === true,
+      `category_id=${itH1.category_id}`);
+
+    check('词表包含匹配（备注/原文含关键词也命中）',
+      dictLib.lookup(ledgerId, '', `在${merchantD}加气 50`, 'expense') !== null);
+    check('词表 kind 过滤（支出词表不给收入用）',
+      dictLib.lookup(ledgerId, merchantD, `${merchantD} 50`, 'income') === null);
+
+    const setPage = await req('GET', '/settings', { cookie });
+    check('设置页展示个人词表卡（可解释）', setPage.status === 200 && setPage.text.includes('个人词表') && setPage.text.includes(merchantD),
+      `HTTP ${setPage.status}`);
+
+    r = await req('POST', '/settings/dict/delete', {
+      cookie, form: { _csrf: csrf, kw: merchantD, kind: 'expense' },
+    });
+    check('词表逐条删除（可遗忘）', r.status === 302 && !dictLib.listActive(ledgerId).some((e) => e.kw === merchantD), `HTTP ${r.status}`);
+    r = await req('POST', '/api/ai/text', { json: { text: '煤气站 80元' }, cookie });
+    const itH2 = (r.json.items || [])[0] || {};
+    check('删除后回落系统关键词（燃气费），兜底链不死锁',
+      Number(itH2.category_id) === Number(gasCat) && !itH2.category_recommended, `category_id=${itH2.category_id}`);
+
+    await req('POST', '/transactions', {
+      cookie, form: {
+        _csrf: csrf, type: 'expense', amount: '80', account_id: String(alipay.id), category_id: String(fruitCat),
+        txn_date: db.todayStr(), merchant: merchantD, note: '',
+      },
+    });
+    check('已删条目不自动复活（4 笔 100% 也不回表）',
+      !dictLib.listActive(ledgerId).some((e) => e.kw === merchantD));
+  }
+
+  // 占比不达标不沉淀：3 水果 + 2 其他 = 60% < 80%
+  const merchantMix = aiLib.cleanMerchant('混合站 10元');
+  const otherCat = aiLib.resolveCategoryId(ledgerId, '其他支出', 'expense');
+  for (let i = 0; i < 3; i++) {
+    txnLib.createTransaction(ledgerId, user.id, {
+      type: 'expense', amount_cents: 1000, account_id: wechat.id, category_id: fruitCat,
+      txn_date: db.todayStr(), merchant: merchantMix, note: '', source: 'manual',
+    });
+  }
+  for (let i = 0; i < 2; i++) {
+    txnLib.createTransaction(ledgerId, user.id, {
+      type: 'expense', amount_cents: 1000, account_id: wechat.id, category_id: otherCat,
+      txn_date: db.todayStr(), merchant: merchantMix, note: '', source: 'manual',
+    });
+  }
+  check('主分类占比不足 80% 不沉淀', !dictLib.listActive(ledgerId).some((e) => e.kw === merchantMix));
+
+  /* --- I. P12 反馈闭环：推荐被改 → 负反馈 → 习惯退火（分类/归属人/账户 + 词表联动） --- */
+  const merchantFb = aiLib.cleanMerchant('康齿堂 300元');
+  check('「康齿堂」不命中关键词表（保证走习惯路径）', !aiLib.classifyByKeywords('康齿堂 300元'));
+  for (let i = 0; i < 2; i++) {
+    txnLib.createTransaction(ledgerId, user.id, {
+      type: 'expense', amount_cents: 30000, account_id: wechat.id, category_id: lunchCat,
+      txn_date: db.todayStr(), merchant: merchantFb, note: '', source: 'manual', owner_label: '老妈',
+    });
+  }
+  r = await req('POST', '/api/ai/text', { json: { text: '康齿堂 300元' }, cookie });
+  const itI0 = (r.json.items || [])[0] || {};
+  check('反馈前：习惯推荐分类/账户/归属人（午餐+微信+老妈）',
+    Number(itI0.category_id) === Number(lunchCat) && itI0.category_recommended === true
+      && Number(itI0.account_id) === Number(wechat.id) && itI0.account_recommended === true
+      && itI0.owner_label === '老妈' && itI0.owner_recommended === true,
+    JSON.stringify({ c: itI0.category_id, a: itI0.account_id, o: itI0.owner_label }));
+
+  // 模拟 m.js/app.js：确认时全改掉，并带上「编辑前的推荐快照」
+  const snap = { category_id: itI0.category_id, account_id: itI0.account_id, owner_label: itI0.owner_label || null };
+  r = await req('POST', '/api/ai/confirm', {
+    cookie, json: {
+      items: [{ ...itI0, category_id: fruitCat, account_id: alipay.id, owner_label: '', rec_snapshot: snap }],
+      source: 'ai_screenshot',
+    },
+  });
+  check('改推荐后确认入库 ok', r.status === 200 && r.json.ok === true && r.json.created === 1, `HTTP ${r.status}`);
+  const fbRows = db.all('SELECT field, recommended, confirmed FROM habit_feedback WHERE ledger_id = ? AND merchant = ?', ledgerId, merchantFb);
+  check('三个被改字段各记一条负反馈',
+    fbRows.filter((x) => x.field === 'category').length === 1
+      && fbRows.filter((x) => x.field === 'account').length === 1
+      && fbRows.filter((x) => x.field === 'owner').length === 1,
+    JSON.stringify(fbRows));
+  check('反馈行记录推荐值与最终值（category）',
+    fbRows.some((x) => x.field === 'category' && Number(x.recommended) === Number(lunchCat) && Number(x.confirmed) === Number(fruitCat)),
+    JSON.stringify(fbRows.filter((x) => x.field === 'category')));
+
+  check('习惯分类退火：午餐被扣穿，水果接棒', Number(aiLib.habitCategoryId(ledgerId, merchantFb)) === Number(fruitCat),
+    String(aiLib.habitCategoryId(ledgerId, merchantFb)));
+  check('习惯归属人退火：老妈被清掉后不再推荐', aiLib.habitOwnerId(ledgerId, merchantFb) === null);
+  r = await req('POST', '/api/ai/text', { json: { text: '康齿堂 300元' }, cookie });
+  const itI1 = (r.json.items || [])[0] || {};
+  check('下一次草稿改推荐水果且不带归属人（学错的不再教）',
+    Number(itI1.category_id) === Number(fruitCat) && itI1.category_recommended === true
+      && !itI1.owner_label,
+    JSON.stringify({ c: itI1.category_id, o: itI1.owner_label }));
+  const ctxFb = aiLib.buildContext(ledgerId);
+  check('习惯摘要不再含被扣穿的映射（康齿堂→餐饮/午餐）', !/康齿堂→餐饮\/午餐/.test(ctxFb.habits || ''), ctxFb.habits);
+
+  // 词表联动扣分：3 笔词表映射被连续改 2 次 → 词表失效 + 习惯同步退火
+  const merchantDict = aiLib.cleanMerchant('甲词表站 60元');
+  check('「甲词表站」不命中关键词表', !aiLib.classifyByKeywords('甲词表站 60元'));
+  for (let i = 0; i < 3; i++) {
+    txnLib.createTransaction(ledgerId, user.id, {
+      type: 'expense', amount_cents: 6000, account_id: wechat.id, category_id: fruitCat,
+      txn_date: db.todayStr(), merchant: merchantDict, note: '', source: 'manual',
+    });
+  }
+  // lib 直建不走路由挂点，显式触发一次沉淀（与 POST /transactions 内部同款调用）
+  dictLib.sediment(ledgerId, merchantDict);
+  check('词表联动前提：甲词表站已沉淀', dictLib.listActive(ledgerId).some((e) => e.kw === merchantDict));
+  for (let round = 0; round < 2; round++) {
+    r = await req('POST', '/api/ai/text', { json: { text: '甲词表站 60元' }, cookie });
+    const itD = (r.json.items || [])[0] || {};
+    r = await req('POST', '/api/ai/confirm', {
+      cookie, json: {
+        items: [{
+          ...itD, category_id: lunchCat,
+          rec_snapshot: { category_id: itD.category_id, account_id: itD.account_id, owner_label: itD.owner_label || null },
+        }],
+        source: 'ai_screenshot',
+      },
+    });
+    check(`第 ${round + 1} 次改掉词表推荐并确认`, r.status === 200 && r.json.ok === true, `HTTP ${r.status}`);
+  }
+  check('词表被连续改 2 次后失效（hits 3−2−2<1）',
+    !dictLib.listActive(ledgerId).some((e) => e.kw === merchantDict),
+    JSON.stringify(dictLib.listActive(ledgerId).slice(0, 5)));
+  r = await req('POST', '/api/ai/text', { json: { text: '甲词表站 60元' }, cookie });
+  const itD2 = (r.json.items || [])[0] || {};
+  check('词表失效 + 习惯同扣穿：最终推荐落到用户改后的分类（午餐）',
+    Number(itD2.category_id) === Number(lunchCat) && itD2.category_recommended === true,
+    `category_id=${itD2.category_id}`);
+
+  // 反馈扣分持久：demote 不被后续 sediment 重估抹掉（审查 P3-2 修复回归）
+  const merchantP = aiLib.cleanMerchant('乙持久站 20元');
+  for (let i = 0; i < 3; i++) {
+    txnLib.createTransaction(ledgerId, user.id, {
+      type: 'expense', amount_cents: 2000, account_id: wechat.id, category_id: fruitCat,
+      txn_date: db.todayStr(), merchant: merchantP, note: '', source: 'manual',
+    });
+  }
+  dictLib.sediment(ledgerId, merchantP);
+  dictLib.demote(ledgerId, merchantP, fruitCat);
+  check('词表扣分后有效分 3−2=1 仍存活（listActive 展示有效值）',
+    dictLib.listActive(ledgerId).some((e) => e.kw === merchantP && e.hits === 1));
+  txnLib.createTransaction(ledgerId, user.id, {
+    type: 'expense', amount_cents: 2000, account_id: wechat.id, category_id: fruitCat,
+    txn_date: db.todayStr(), merchant: merchantP, note: '', source: 'manual',
+  });
+  dictLib.sediment(ledgerId, merchantP); // 重估刷新 hits=4，penalty 应保留
+  check('sediment 重估不抹掉扣分（有效分 4−2=2）',
+    dictLib.listActive(ledgerId).some((e) => e.kw === merchantP && e.hits === 2));
+  dictLib.demote(ledgerId, merchantP, fruitCat);
+  check('再次扣分即失效（4−2−2<1 → dismissed）', !dictLib.listActive(ledgerId).some((e) => e.kw === merchantP));
+
+  // 类型被改（支出↔收入）时只比归属人（审查 P3-8 修复回归：跨 kind 分类/账户比对无意义）
+  aiLib.recordDraftFeedback(ledgerId, [{
+    type: 'income', merchant: '类型变更站', category_id: lunchCat, account_id: alipay.id, owner_label: '',
+    rec_snapshot: { type: 'expense', category_id: fruitCat, account_id: wechat.id, owner_label: '老妈' },
+  }]);
+  const rowsType = db.all('SELECT field FROM habit_feedback WHERE merchant = ?', '类型变更站');
+  check('类型变更只记归属人一条负反馈', rowsType.length === 1 && rowsType[0].field === 'owner', JSON.stringify(rowsType));
+
+  // 没推荐过的字段被改不记反馈（其他兜底换成真分类不是惩罚）
+  const beforeNoRec = Number(db.get('SELECT COUNT(*) AS c FROM habit_feedback').c);
+  r = await req('POST', '/api/ai/confirm', {
+    cookie, json: {
+      items: [{
+        type: 'expense', amount_cents: 1200, txn_date: db.todayStr(), merchant: '无推荐站',
+        account_id: alipay.id, category_id: fruitCat, note: '',
+        rec_snapshot: { category_id: null, account_id: null, owner_label: null },
+      }],
+    },
+  });
+  check('快照为空的字段不产生负反馈', r.status === 200 && r.json.ok === true
+    && Number(db.get('SELECT COUNT(*) AS c FROM habit_feedback').c) === beforeNoRec);
+  // 旧客户端不带快照：优雅跳过
+  r = await req('POST', '/api/ai/confirm', {
+    cookie, json: { items: [{ type: 'expense', amount_cents: 1200, txn_date: db.todayStr(), merchant: '无快照站', account_id: alipay.id, category_id: fruitCat, note: '' }] },
+  });
+  check('不带快照的旧客户端确认不报错也不记反馈', r.status === 200 && r.json.ok === true
+    && Number(db.get('SELECT COUNT(*) AS c FROM habit_feedback').c) === beforeNoRec);
 
   console.log(`\n=== 结果：${pass} 通过 / ${fail} 失败 ===`);
   process.exit(fail ? 1 : 0);
