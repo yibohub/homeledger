@@ -139,7 +139,7 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
     && js.text.includes('item.merchant = merchIn.value.trim()') && js.text.includes('item.owner_label = ownerIn.value.trim() || null'), '');
   check('m.js 草稿确认带推荐快照（P12 反馈信号，编辑前留档）', js.status === 200 && js.text.includes('rec_snapshot'), '');
   check('m.js 草稿分支渲染警示（敏感分流提示随 say 持续到下次识别，不再无提示）',
-    js.status === 200 && (js.text.match(/data\.warnings/g) || []).length >= 2, '');
+    js.status === 200 && js.text.includes("say('warn', '⚠ ' + data.warnings.join('；'))"), '');
   const djs = await req('GET', '/static/js/app.js', { ua: DESKTOP_UA });
   check('桌面 AI 页文字快记同分流（问句出回答不建草稿）', djs.status === 200 && djs.text.includes("res.mode === 'answer'"), `HTTP ${djs.status}`);
   check('桌面草稿确认带推荐快照（P12 反馈信号，按卡片索引回取编辑前原值）',
