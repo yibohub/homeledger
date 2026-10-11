@@ -75,6 +75,10 @@
 - [ ] 无容器公网部署绕过守卫：源码直跑（npm start/systemd）通常不设 NODE_ENV，两守卫全部失效且 HOST 默认 0.0.0.0——出现该部署场景时加「无 NODE_ENV + 非本机监听」告警
 - [ ] COOKIE_SECURE 全仓库无文档提及（Caddy HTTPS 部署未设时会话 cookie 无 Secure 标志）——下次动部署文档/compose 模板时顺带补说明
 
+### PWA 移动端 App 模式（维护者实测 2026-10-11，已闭环）
+服务端 manifest 配置正确（`application/manifest+json` + `display: standalone` 已本地验 Content-Type），安卓 Edge（HTTPS）菜单「安装」= 独立无地址栏窗口，维护者真机确认可用 ✅。鸿蒙华为浏览器「添加至桌面」只建书签快捷方式（浏览器能力限制，服务端无解；缓解：`∷`→全屏浏览 / 设置开「滑动隐藏工具栏」）；普通标签页两浏览器等价（地址栏滑动才隐藏，仅位置上下不同）。
+- [ ] 触发即做：维护者在意 iPhone 添加主屏图标（缺 apple-touch-icon，现为页面截图）或出现其他浏览器不可安装反馈时，补 PNG 180/192/512（manifest icons 前插 + 两布局加 link + manifest 链接加版本参数防 7 天静态缓存）——Chromium 对纯 SVG 图标的可安装性判定在部分版本不可靠，PNG 是标准做法
+
 ### AI 草稿卡展示不全 + 可改字段过少（维护者反馈 2026-10-11）
 ~~三个入口现状：桌面 AI 页草稿卡几乎全可改……~~ ✅ 已随第五批（PR #26）修复，详见「已完成」。
 
