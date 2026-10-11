@@ -121,10 +121,11 @@ router.get('/annual', auth.requireLogin, (req, res) => {
   const ledgerId = Number(ledger.id);
   const year = /^\d{4}$/.test(String(req.query.year || '')) ? String(req.query.year) : todayStr().slice(0, 4);
   const stats = annual.yearStats(ledgerId, year);
-  // 年份切换器：账本第一笔账所在年 ~ 当前年（最多列 6 个，再往前不常见）
-  const firstYear = Number((get(
+  // 年份切换器：账本第一笔账所在年 ~ 当前年（最多列 6 个，再往前不常见）；
+  // 存在未来日期流水时 firstYear 会大于当前年，钳到当前年保证切换器不空
+  const firstYear = Math.min(Number((get(
     'SELECT MIN(txn_date) AS d FROM transactions WHERE ledger_id = ? AND deleted_at IS NULL', ledgerId
-  )?.d || todayStr()).slice(0, 4));
+  )?.d || todayStr()).slice(0, 4)), Number(todayStr().slice(0, 4)));
   const curYear = Number(todayStr().slice(0, 4));
   const years = [];
   for (let y = curYear; y >= Math.max(firstYear, curYear - 5); y--) years.push(String(y));

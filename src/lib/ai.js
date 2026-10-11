@@ -724,6 +724,8 @@ function habitCategoryId(ledgerId, merchant, type = 'expense') {
  * 任何失败静默返回（无 Key / 模型挂了 → 行为同现状「其他」，不挡导入）。
  */
 const IMPORT_AI_MERCHANT_CAP = 40;
+/** 导入兜底的模型超时单独取短值：预览是交互按钮路径，兜底丢了就落「其他」，不值得让用户等长超时 */
+const IMPORT_AI_TIMEOUT_MS = 25000;
 
 const IMPORT_FALLBACK_PROMPT = `你是一个记账分类助手。给你一批商户名和一份分类清单，请给每个商户选一个最贴近的分类。
 要求：
@@ -735,6 +737,15 @@ async function enrichImportCategories(ledgerId, records) {
   const enriched = { dict: 0, habit: 0, ai: 0 };
   try {
     const pending = { expense: new Map(), income: new Map() }; // merchant -> recs
+    // 大 CSV 逐行点查会放大成上万次查询：词表/习惯按「方向|商户」记忆化（同输入同结果）
+    const memo = new Map();
+    const localCat = (merchant, kind, text) => {
+      const key = `${kind}|${merchant}|${text}`;
+      if (!memo.has(key)) {
+        memo.set(key, dict.lookup(ledgerId, merchant, text, kind) || habitCategoryId(ledgerId, merchant, kind) || null);
+      }
+      return memo.get(key);
+    };
     for (const rec of records || []) {
       if (rec.neutral || rec.category_id) continue;
       if (!['expense', 'income'].includes(rec.type)) continue;
@@ -743,18 +754,11 @@ async function enrichImportCategories(ledgerId, records) {
       if (!merchant) continue;
       if (rec.category_hint && resolveCategoryId(ledgerId, rec.category_hint, kind)) continue; // 现状 hint 链
       if (classifyByKeywords(rec.text)) continue; // 现状关键词链
-      const hit = dict.lookup(ledgerId, merchant, rec.text || '', kind);
-      if (hit) {
-        rec.category_id = Number(hit.category_id);
-        rec.category_source = 'dict';
-        enriched.dict += 1;
-        continue;
-      }
-      const habitCat = habitCategoryId(ledgerId, merchant, kind);
-      if (habitCat) {
-        rec.category_id = habitCat;
-        rec.category_source = 'habit';
-        enriched.habit += 1;
+      const local = localCat(merchant, kind, rec.text || '');
+      if (local) {
+        rec.category_id = Number(local.category_id || local);
+        rec.category_source = local.category_id ? 'dict' : 'habit';
+        enriched[rec.category_source] += 1;
         continue;
       }
       if (!pending[kind].has(merchant)) pending[kind].set(merchant, []);
@@ -769,7 +773,9 @@ async function enrichImportCategories(ledgerId, records) {
       if (!merchants.length) continue;
       jobs.push({ kind, merchants: merchants.slice(0, IMPORT_AI_MERCHANT_CAP) });
     }
-    for (const job of jobs) {
+    // 两方向并行（各一次请求、独立 25s 短超时）：预览是交互路径，最坏阻塞不应按 90s×2 计
+    const fastCfg = { ...getAiConfig(), timeoutMs: IMPORT_AI_TIMEOUT_MS };
+    await Promise.all(jobs.map(async (job) => {
       const paths = job.kind === 'income' ? cats.incomePaths : cats.expensePaths;
       const out = await callModel([
         { role: 'system', content: IMPORT_FALLBACK_PROMPT },
@@ -777,7 +783,7 @@ async function enrichImportCategories(ledgerId, records) {
           role: 'user',
           content: `分类清单（${job.kind === 'income' ? '收入' : '支出'}，完整路径）：${paths.join('、')}\n商户名单：\n${job.merchants.join('\n')}`,
         },
-      ]);
+      ], fastCfg);
       const data = extractJson(out) || {};
       for (const m of (Array.isArray(data.mappings) ? data.mappings : [])) {
         const merchant = String(m.merchant || '').trim();
@@ -791,7 +797,7 @@ async function enrichImportCategories(ledgerId, records) {
           enriched.ai += 1;
         }
       }
-    }
+    }));
   } catch (e) {
     console.error('[ai] 导入分类兜底失败（不影响导入）:', e.message);
   }

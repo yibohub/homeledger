@@ -263,7 +263,13 @@ function importRecords({
             categoryId = pre;
           }
           const kw = classifyByKeywords(rec.text);
-          if (rec.category_hint) categoryId = resolveCategoryId(ledgerId, rec.category_hint, kind);
+          if (rec.category_hint) {
+            // hint 解析成功才覆盖（可能覆盖 pre——但富化本就跳过 hint 可解析的记录，两者互斥）；
+            // 解析失败必须保留 pre：微信/支付宝真实账单普遍带「交易分类」列，很多值默认树解析不了，
+            // 无条件赋 null 会把富化结果打掉（预览与落库不一致）
+            const hintId = resolveCategoryId(ledgerId, rec.category_hint, kind);
+            if (hintId) categoryId = hintId;
+          }
           if (!categoryId && kw) categoryId = resolveCategoryId(ledgerId, kw.category, kw.kind === 'income' ? 'income' : kind);
           if (!categoryId) categoryId = resolveCategoryId(ledgerId, kind === 'income' ? '其他收入' : '其他支出', kind);
         }

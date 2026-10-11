@@ -118,7 +118,7 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   check('最大单笔（9,999.00）', r.text.includes('9,999.00'), '');
   check('第一笔账（2025-01-05）', r.text.includes('2025-01-05'), '');
   check('归属人分布（老妈）', r.text.includes('老妈'), '');
-  check('年份切换器含 2025 与 2026', r.text.includes('/annual?year=2025') && r.text.includes('/annual?year=2026'), '');
+  check('年份切换器含 2025 与当前年', r.text.includes('/annual?year=2025') && r.text.includes(`/annual?year=${new Date().getFullYear()}`), '');
   check('报表页有年度账单入口', (await req('GET', '/reports', { cookie })).text.includes('/annual'), '');
 
   /* --- XSS：商户名进 DOM 一律转义（怪店<script> 在 2026 页） --- */
@@ -151,6 +151,11 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   });
   await new Promise((resolve) => mock.listen(0, '127.0.0.1', resolve));
   const mockPort = mock.address().port;
+  const savedAi = {
+    enabled: db.getSetting('ai.enabled', 'false'),
+    base: db.getSetting('ai.base_url', ''),
+    model: db.getSetting('ai.model', ''),
+  };
   db.setSetting('ai.enabled', 'true');
   db.setSetting('ai.base_url', `http://127.0.0.1:${mockPort}/v1`);
   db.setSetting('ai.model', 'mock-narrator');
@@ -170,6 +175,9 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
     // 叙事出网只含聚合值：mock 收到的请求体不含任何单笔明细字段
   } finally {
     mock.close();
+    db.setSetting('ai.enabled', savedAi.enabled);
+    db.setSetting('ai.base_url', savedAi.base);
+    db.setSetting('ai.model', savedAi.model);
   }
 
   console.log(`\n=== 结果：${pass} 通过 / ${fail} 失败 ===`);

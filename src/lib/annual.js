@@ -114,7 +114,8 @@ function narrativePayload(stats) {
     每月支出元: stats.monthly.map((m) => yuan(m.expense)).join(','),
     支出Top分类: stats.topCats.map((c) => `${c.name} ${yuan(c.total)}元`).slice(0, 5),
     最常去商户: stats.topMerchants.map((m) => `${m.merchant} ${m.cnt}笔`).slice(0, 5),
-    最大单笔支出: stats.biggest ? `${stats.biggest.merchant || stats.biggest.note || ''} ${yuan(stats.biggest.amount)}元（${stats.biggest.txn_date}）` : '无',
+    // 最大单笔只出商户名+金额：备注是用户自由文本、日期属流水明细，都不出网（聚合边界从严）
+    最大单笔支出: stats.biggest && stats.biggest.merchant ? `${stats.biggest.merchant} ${yuan(stats.biggest.amount)}元` : '无',
     归属人支出: stats.owners.map((o) => `${o.label} ${yuan(o.expense)}元`).slice(0, 5),
   };
 }

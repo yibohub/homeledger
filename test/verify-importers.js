@@ -464,6 +464,7 @@ const formCsrf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[
   const NAP = JSON.stringify({ mappings: [
     { merchant: '丙模型站', category_name: '餐饮/外卖' },
     { merchant: '张三老熟人', category_name: '工资' },
+    { merchant: '戊亲属卡站', category_name: '餐饮/外卖' },
   ] });
   const mock = http.createServer((mq, mr) => {
     mq.on('data', () => {});
@@ -492,6 +493,19 @@ const formCsrf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[
     check('提交采信习惯富化（早餐）', catOf('乙习惯站')?.n === '早餐', JSON.stringify(catOf('乙习惯站')));
     check('提交采信 AI 兜底（外卖）', catOf('丙模型站')?.n === '外卖', JSON.stringify(catOf('丙模型站')));
     check('提交采信 AI 兜底（工资，收入方向）', catOf('张三老熟人')?.k === 'income' && catOf('张三老熟人')?.n === '工资', JSON.stringify(catOf('张三老熟人')));
+
+    // P1 回归：带「交易分类」列且值默认树解析不了（亲属卡——真实微信账单常见）时，
+    // 提交侧 hint 解析失败不得把富化结果覆盖成 null（此前预览显示 AI 分类、落库却是「其他」）
+    const p8Csv2 = [
+      '交易时间,收/支,金额(元),交易对方,商品说明,交易分类',
+      `${db.todayStr()} 16:00:00,支出,44.00,戊亲属卡站,神秘商品,亲属卡`,
+    ].join('\n');
+    r = await req('POST', '/api/import/preview', { json: { dataUrl: 'data:text/csv;base64,' + Buffer.from(p8Csv2, 'utf8').toString('base64'), fileName: 'p8-hint.csv' } });
+    check('不可解析 hint 不挡富化（戊亲属卡站→餐饮/外卖（AI））',
+      /餐饮\/外卖（AI）/.test((r.body?.sample || [])[0]?.guess_category || ''), (r.body?.sample || [])[0]?.guess_category);
+    r = await req('POST', '/api/import/commit', { json: { token: r.body?.token } });
+    check('带不可解析 hint 提交 1 笔入库', r.body?.ok === true && r.body.imported === 1, JSON.stringify({ i: r.body?.imported, f: r.body?.failed }));
+    check('hint 解析失败保留富化分类（外卖而非其他）', catOf('戊亲属卡站')?.n === '外卖', JSON.stringify(catOf('戊亲属卡站')));
   } finally {
     mock.close();
     setSet('ai.enabled', savedAi.enabled);
