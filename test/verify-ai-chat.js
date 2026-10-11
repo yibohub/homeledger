@@ -5,10 +5,12 @@
  * 需先在 8099 起隔离实例：
  *   PORT=8099 HOST=127.0.0.1 DATA_DIR=<repo>/data-verify node server.js
  * 覆盖：未登录拒绝、空载荷、纯文字自动记账（规则引擎）、文字+图片附件关联、
- *       仅图片零结果的友好返回、页面挂载（FAB/面板/脚本/CSS）、明细页 AI 筛选可见
+ *       仅图片零结果的友好返回、页面挂载（FAB/面板/脚本/CSS）、明细页 AI 筛选可见、
+ *       敏感记账本地分流（收入类关键词命中不出网，默认开可关；mock 模型计数器验证）
  *
  * 运行：node test/verify-ai-chat.js
  */
+const http = require('node:http');
 const BASE = 'http://127.0.0.1:8099';
 
 let pass = 0, fail = 0;
@@ -125,6 +127,91 @@ const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
   const many = Array.from({ length: 9 }, () => ({ dataUrl: TINY_PNG }));
   const chat4 = await req('POST', '/api/ai/chat', { json: { text: '测试', images: many }, cookie });
   check('图片最多收 6 张（9 张入参被裁剪）', (chat4.json.images || []).length === 6, `images=${(chat4.json.images || []).length}`);
+
+  /* --- 敏感记账本地分流（默认开；mock 模型带调用计数器）--- */
+  console.log('\n=== 敏感记账本地分流 ===\n');
+  const db = require('../src/db');
+  const dbGet = (k) => db.getSetting(k, '');
+  // mock 模型：返回合法识别结果 + 调用计数（被调用即计数，分流正确时敏感文本应为 0 次）
+  let mockCalls = 0;
+  const MODEL_MERCHANT = '对照模型识别';
+  const mock = http.createServer((mq, mr) => {
+    mq.on('data', () => {});
+    mq.on('end', () => {
+      mockCalls += 1;
+      mr.writeHead(200, { 'Content-Type': 'application/json' });
+      mr.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+        items: [{ type: 'expense', amount: 35, txn_date: new Date().toISOString().slice(0, 10), merchant: MODEL_MERCHANT, category_name: '餐饮/午餐', confidence: 0.9 }],
+      }) } }] }));
+    });
+  });
+  await new Promise((res2) => mock.listen(0, '127.0.0.1', res2));
+  // 走设置路由写配置（顺带覆盖 ai.sensitive_local_only 的 checkbox 解析）
+  r = await req('GET', '/settings', { cookie });
+  check('设置页渲染敏感分流开关', r.status === 200 && r.text.includes('敏感记账走本地规则'), `HTTP ${r.status}`);
+  const aiCsrf = csrfOf(r.text);
+  await req('POST', '/settings/ai', {
+    cookie, form: {
+      _csrf: aiCsrf, 'ai.enabled': '1', 'ai.base_url': `http://127.0.0.1:${mock.address().port}/v1`,
+      'ai.model': 'mock-guard', 'ai.vision': '1', 'ai.timeout_ms': '90000', 'ai.sensitive_local_only': '1',
+    },
+  });
+  check('设置路由把开关持久化为开', dbGet('ai.sensitive_local_only') === 'true', dbGet('ai.sensitive_local_only'));
+
+  // 开关 ON：敏感文本不出网
+  const beforeSensitive = mockCalls;
+  r = await req('POST', '/api/ai/chat', { json: { text: '十月工资 12000 到账' }, cookie });
+  check('敏感文本（工资）走规则引擎', r.json?.engine === 'rule' && r.json.ok === true, `engine=${r.json?.engine}`);
+  check('敏感文本模型零调用', mockCalls === beforeSensitive, `calls=${mockCalls - beforeSensitive}`);
+  check('敏感分流带透明提示', (r.json.warnings || []).some((w) => w.includes('未发送至模型服务')), (r.json.warnings || []).join(' | '));
+  check('规则链正确识别收入（type=income 且金额 12000）',
+    (r.json.items || []).some((it) => it.type === 'income' && Number(it.amount_cents) === 1200000),
+    JSON.stringify((r.json.items || [])[0] || {}));
+
+  // 开关 ON：草稿路径同样分流（不入库）
+  r = await req('POST', '/api/ai/text', { json: { text: '年终奖 8000' }, cookie });
+  check('草稿路径敏感文本也走规则（不入库）',
+    r.json?.engine === 'rule' && r.json.items?.length >= 1 && r.json.created === undefined, `engine=${r.json?.engine}`);
+  check('敏感文本模型仍零调用', mockCalls === beforeSensitive, `calls=${mockCalls - beforeSensitive}`);
+
+  // 开关 ON：非敏感文本正常走模型（防误拦）
+  r = await req('POST', '/api/ai/chat', { json: { text: '午饭 35 元' }, cookie });
+  check('非敏感文本正常走模型（engine=llm）', r.json?.engine === 'llm', `engine=${r.json?.engine}`);
+  check('模型结果生效（商户来自 mock）', (r.json.items || [])[0]?.merchant === MODEL_MERCHANT, (r.json.items || [])[0]?.merchant);
+  check('非敏感模型调用 +1', mockCalls === beforeSensitive + 1, `calls=${mockCalls - beforeSensitive}`);
+
+  // 开关 OFF（设置路由不勾选 → 持久化为 false）：同一敏感文本改走模型
+  await req('POST', '/settings/ai', {
+    cookie, form: {
+      _csrf: aiCsrf, 'ai.enabled': '1', 'ai.base_url': `http://127.0.0.1:${mock.address().port}/v1`,
+      'ai.model': 'mock-guard', 'ai.vision': '1', 'ai.timeout_ms': '90000',
+    },
+  });
+  check('开关关闭持久化', dbGet('ai.sensitive_local_only') === 'false', dbGet('ai.sensitive_local_only'));
+  r = await req('POST', '/api/ai/chat', { json: { text: '十月工资 12000 到账' }, cookie });
+  check('关掉后敏感文本走模型（对比口径）', r.json?.engine === 'llm', `engine=${r.json?.engine}`);
+  check('关掉后模型调用 +1', mockCalls === beforeSensitive + 2, `calls=${mockCalls - beforeSensitive}`);
+
+  // 重新开启（直接写库，路由持久化已在上文双向覆盖）：锁误拦回归与新词
+  db.setSetting('ai.sensitive_local_only', 'true');
+  r = await req('POST', '/api/ai/chat', { json: { text: '养老金 3500 到账' }, cookie });
+  check('新词覆盖（养老金）走规则且模型零调用', r.json?.engine === 'rule' && mockCalls === beforeSensitive + 2,
+    `engine=${r.json?.engine} calls=${mockCalls - beforeSensitive}`);
+  // 误拦回归（审查 P2-2）：歧义资金词不拦——拦了的代价是规则链错向 + 悬浮球自动入库错数据
+  r = await req('POST', '/api/ai/chat', { json: { text: '还房贷 5000 元 本金加利息' }, cookie });
+  check('歧义词（裸利息/房贷）不拦截，交给模型识别方向', r.json?.engine === 'llm', `engine=${r.json?.engine}`);
+  check('歧义不拦截模型调用 +1', mockCalls === beforeSensitive + 3, `calls=${mockCalls - beforeSensitive}`);
+  check('模型正确识别支出方向（不产生错向收入）',
+    (r.json.items || [])[0]?.type === 'expense', JSON.stringify((r.json.items || [])[0] || {}).slice(0, 120));
+  r = await req('POST', '/api/ai/chat', { json: { text: '买理财 10000 元' }, cookie });
+  check('歧义词（买理财）不拦截', r.json?.engine === 'llm' && mockCalls === beforeSensitive + 4,
+    `engine=${r.json?.engine} calls=${mockCalls - beforeSensitive}`);
+
+  await new Promise((res2) => mock.close(res2));
+  db.setSetting('ai.enabled', 'false');
+  db.setSetting('ai.base_url', '');
+  db.setSetting('ai.model', '');
+  db.setSetting('ai.sensitive_local_only', 'true');
 
   console.log(`\n=== 结果：${pass} 通过 / ${fail} 失败 ===`);
   process.exit(fail ? 1 : 0);
