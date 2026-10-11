@@ -273,10 +273,24 @@
   }
 
   /* ============================ 记账表单 ============================ */
+  /* 文字快记单笔跳转带来的 AI 警示（如「未发送至模型服务」）：在页面顶部持久渲染，
+     取走即清——只展示一次，不跟随后续导航。锚 .content（layout 顶部横幅位，与服务端
+     flash 同容器）而非首个 .grid——txn-form 的 grid-main 是两列网格，插子元素会把
+     主表单挤进窄列 */
+  function initAiWarnFlash() {
+    let msg = '';
+    try { msg = sessionStorage.getItem('hl_ai_warn') || ''; sessionStorage.removeItem('hl_ai_warn'); } catch { return; }
+    if (!msg) return;
+    const host = document.querySelector('.content') || document.body;
+    const box = document.createElement('div');
+    box.className = 'flash warn mb16';
+    box.textContent = '⚠ ' + msg;
+    host.insertBefore(box, host.firstChild);
+  }
+
   function initTxnForm() {
     const form = $('#txn-form');
     if (!form) return;
-
     // 类型切换（保留已填内容）
     $$('.type-tabs [data-type]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -579,8 +593,11 @@
             resultBox.innerHTML = h;
             return;
           }
-          (res.warnings || []).forEach((w) => toast(w, 'warn'));
-          if (!res.items.length) return toast('没能识别出金额，请换个说法，例如「午饭 35 元 支付宝」', 'warn');
+          if (!res.items.length) {
+            // 空 items 也可能带警示（敏感命中但规则解析不出金额）——不能静默丢
+            const extra = res.warnings && res.warnings.length ? '（' + res.warnings.join('；') + '）' : '';
+            return toast('没能识别出金额，请换个说法，例如「午饭 35 元 支付宝」' + extra, 'warn');
+          }
           const single = res.items[0];
           const url = '/transactions/new?type=' + encodeURIComponent(single.type) +
             '&amount=' + encodeURIComponent((single.amount_cents / 100).toFixed(2)) +
@@ -588,8 +605,16 @@
             (single.category_id ? '&category_id=' + encodeURIComponent(single.category_id) : '') +
             (single.account_id ? '&account_id=' + encodeURIComponent(single.account_id) : '') +
             '&note=' + encodeURIComponent(single.note || single.merchant || '') + '&from_ai=1';
-          if (res.items.length === 1) { window.location.href = url; return; }
-          // 多笔：走草稿确认
+          if (res.items.length === 1) {
+            // 警示（如敏感分流的「未发送至模型服务」）必须跟着跳转走：单笔直接 302 到表单，
+            // 留在闪现 toast 里根本看不到——存 sessionStorage 由表单页持久渲染（initAiWarnFlash）
+            if (res.warnings && res.warnings.length) {
+              try { sessionStorage.setItem('hl_ai_warn', res.warnings.join('；')); } catch { /* 隐私模式存不进就算了 */ }
+            }
+            window.location.href = url;
+            return;
+          }
+          // 多笔：走草稿确认（renderDrafts 头部自带持久 flash 警示，无需 toast）
           lastScanIds = [];
           renderDrafts({ items: res.items, engine: res.engine, warnings: res.warnings || [], family: res.family });
         } finally {
@@ -1273,6 +1298,7 @@
     initSidebar();
     initUserMenu();
     initAvatarUpload();
+    initAiWarnFlash();
     initTxnForm();
     initAiPage();
     initImportPage();
