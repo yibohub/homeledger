@@ -68,6 +68,7 @@ function buildWhere(ledgerId, f = {}) {
     params.push(f.accountId, f.accountId);
   }
   if (f.memberId) { where.push('t.user_id = ?'); params.push(f.memberId); }
+  if (f.owner) { where.push('t.owner_label = ?'); params.push(String(f.owner).replace(/[\s\u3000]+/g, '')); }
   if (f.source) { where.push('t.source = ?'); params.push(f.source); }
   if (f.tagId) {
     where.push('EXISTS (SELECT 1 FROM transaction_tags tt WHERE tt.transaction_id = t.id AND tt.tag_id = ?)');
@@ -187,8 +188,8 @@ function createTransaction(ledgerId, userId, d) {
   const info = run(
     `INSERT INTO transactions
      (ledger_id, type, amount_cents, currency, rate, amount_base_cents, account_id, to_account_id, category_id,
-      user_id, txn_date, note, merchant, status, is_reimbursable, group_id, source, ai_json, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      user_id, txn_date, note, merchant, status, is_reimbursable, group_id, source, ai_json, owner_label, created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ledgerId, type, amount, currency, rate, toBase(amount, rate), accountId, toAccountId,
     pickCategory(ledgerId, d.category_id), userId, txnDate,
     d.note ? String(d.note).slice(0, 300) : null,
@@ -198,6 +199,7 @@ function createTransaction(ledgerId, userId, d) {
     d.group_id || null,
     d.source || 'manual',
     d.ai_json || null,
+    cleanOwner(d.owner_label),
     nowStr(), nowStr()
   );
   const id = info.lastInsertRowid;
@@ -231,7 +233,7 @@ function updateTransaction(id, ledgerId, userId, d) {
   run(
     `UPDATE transactions SET type=?, amount_cents=?, currency=?, rate=?, amount_base_cents=?, account_id=?,
        to_account_id=?, category_id=?, txn_date=?, note=?, merchant=?, status=?, is_reimbursable=?,
-       updated_at=? WHERE id=?`,
+       owner_label=?, updated_at=? WHERE id=?`,
     type, amount, d.currency || old.currency, rate, toBase(amount, rate),
     accountId, toAccountId,
     pickCategory(ledgerId, d.category_id),
@@ -240,6 +242,7 @@ function updateTransaction(id, ledgerId, userId, d) {
     d.merchant ? String(d.merchant).slice(0, 60) : null,
     d.status === 'pending' ? 'pending' : 'cleared',
     d.is_reimbursable ? 1 : 0,
+    cleanOwner(d.owner_label),
     nowStr(), id
   );
   applyTags(id, ledgerId, d.tags, true);
@@ -250,8 +253,13 @@ function updateTransaction(id, ledgerId, userId, d) {
   return id;
 }
 
-function softDelete(id, ledgerId) {
-  const t = get('SELECT * FROM transactions WHERE id = ? AND ledger_id = ?', id, ledgerId);
+/** 归属人标签清洗（与 lib/ai.cleanOwnerLabel 同规则：去空白、截 20 字；空串存 null） */
+function cleanOwner(raw) {
+  const s = String(raw || '').replace(/[\s\u3000]+/g, '').trim();
+  return s ? s.slice(0, 20) : null;
+}
+
+function softDelete(id, ledgerId) {  const t = get('SELECT * FROM transactions WHERE id = ? AND ledger_id = ?', id, ledgerId);
   if (!t) return false;
   run('UPDATE transactions SET deleted_at = ?, updated_at = ? WHERE id = ?', nowStr(), nowStr(), id);
   // 分账数据保留（物理删除后「恢复」就找不回来了）；列表/统计均按 deleted_at 过滤，无副作用
@@ -489,6 +497,21 @@ function memberBreakdown(ledgerId, start, end) {
   ).map((r) => ({ ...r, expense: Number(r.expense), income: Number(r.income), cnt: Number(r.cnt) }));
 }
 
+/** 按归属人聚合（P11：这笔钱为谁花），只统计带归属人标签的流水 */
+function ownerBreakdown(ledgerId, start, end) {
+  return all(
+    `SELECT owner_label AS label,
+       COALESCE(SUM(CASE WHEN t.type IN (${EXPENSE_TYPES.map(() => '?').join(',')}) THEN t.amount_base_cents ELSE 0 END),0) AS expense,
+       COALESCE(SUM(CASE WHEN t.type IN (${INCOME_TYPES.map(() => '?').join(',')}) THEN t.amount_base_cents ELSE 0 END),0) AS income,
+       COUNT(*) AS cnt
+     FROM transactions t
+     WHERE t.ledger_id = ? AND t.deleted_at IS NULL AND t.txn_date BETWEEN ? AND ?
+       AND t.owner_label IS NOT NULL AND t.owner_label != ''
+     GROUP BY t.owner_label ORDER BY expense DESC`,
+    ...EXPENSE_TYPES, ...INCOME_TYPES, ledgerId, start, end
+  ).map((r) => ({ ...r, expense: Number(r.expense), income: Number(r.income), cnt: Number(r.cnt) }));
+}
+
 /** 每日聚合（日历/趋势） */
 function dailyBreakdown(ledgerId, start, end) {
   return all(
@@ -547,6 +570,6 @@ module.exports = {
   listTransactions, groupByDate, getTransaction,
   createTransaction, updateTransaction, softDelete, bulkDelete, markReimbursed,
   applyTags, saveSplits, splitsOf,
-  summary, categoryBreakdown, subcategoryBreakdown, monthlyTrend, memberBreakdown,
+  summary, categoryBreakdown, subcategoryBreakdown, monthlyTrend, memberBreakdown, ownerBreakdown,
   dailyBreakdown, accountOverview, netWorthTrend, rangeOf, syncDebts,
 };

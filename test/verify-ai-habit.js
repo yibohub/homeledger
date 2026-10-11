@@ -206,6 +206,35 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
     `account_id=${itG3.account_id}`);
   db.run('UPDATE accounts SET is_archived = 0 WHERE id = ?', wechat.id);
 
+
+  /* --- P11 消费归属人：提取/臆造核验/习惯补位/名单/统计/落库 --- */
+  const famSaved = db.getSetting(`family.members.${ledgerId}`, "[]");
+  db.setSetting(`family.members.${ledgerId}`, JSON.stringify(['老妈', '老爸']));
+  check('归属人名单：手动名单在前', aiLib.familyMembers(ledgerId).slice(0, 2).join(',') === '老妈,老爸', JSON.stringify(aiLib.familyMembers(ledgerId)));
+  const o1 = aiLib.normalizeItem({ type: 'expense', amount: 50, txn_date: db.todayStr(), merchant: '口腔医院', for_member: '老妈' }, ledgerId, { sourceText: '给老妈买药 50 元 口腔医院' });
+  check('归属人提取：for_member 原文有据 → 采用', o1.owner_label === '老妈', JSON.stringify(o1.owner_label));
+  const o2 = aiLib.normalizeItem({ type: 'expense', amount: 50, txn_date: db.todayStr(), merchant: '超市', for_member: '红霞' }, ledgerId, { sourceText: '超市购物 50 元' });
+  check('归属人臆造核验：原文没提到 → 丢弃', o2.owner_label === null, JSON.stringify(o2.owner_label));
+  // 习惯补位：先经确认接口落两笔带归属人的口腔医院（顺带覆盖 confirm 落库链路）
+  const accAny = db.get('SELECT id FROM accounts WHERE ledger_id = ? AND is_archived = 0 LIMIT 1', ledgerId);
+  let confirmedOwner = false;
+  for (const amt of [60, 55]) {
+    const rC = await req('POST', '/api/ai/confirm', { json: { items: [{ type: 'expense', amount_cents: amt * 100, account_id: Number(accAny.id), category_id: null, txn_date: db.todayStr(), merchant: '口腔医院', note: '', owner_label: '老妈' }], source: 'ai_screenshot' } });
+    confirmedOwner = !!(rC.json && rC.json.ok);
+  }
+  check('确认入库接口接受归属人', confirmedOwner, '');
+  const ownerRow = db.get("SELECT owner_label FROM transactions WHERE ledger_id = ? AND merchant = '口腔医院' AND deleted_at IS NULL LIMIT 1", ledgerId);
+  check('确认入库：owner_label 落库', ownerRow && ownerRow.owner_label === '老妈', JSON.stringify(ownerRow));
+  const o3 = aiLib.normalizeItem({ type: 'expense', amount: 60, txn_date: db.todayStr(), merchant: '口腔医院' }, ledgerId, { sourceText: '口腔医院 60 元' });
+  check('归属人习惯补位：同商户 ≥2 次 → 推荐且带标记', o3.owner_label === '老妈' && o3.owner_recommended === true, JSON.stringify({ o: o3.owner_label, r: o3.owner_recommended }));
+  check('归属人沉淀并入候选名单', aiLib.familyMembers(ledgerId).includes('老妈'), JSON.stringify(aiLib.familyMembers(ledgerId)));
+  const ob = txnLib.ownerBreakdown(ledgerId, '2000-01-01', '9999-12-31');
+  check('归属人统计聚合', ob.length >= 1 && ob[0].label === '老妈' && ob[0].cnt >= 2, JSON.stringify(ob));
+  check('流水按归属人筛选', txnLib.listTransactions(ledgerId, { owner: '老妈' }).rows.length >= 2, '');
+  check('归属人筛选清洗空白（「 老 妈 」→ 老妈）', txnLib.listTransactions(ledgerId, { owner: ' 老 妈 ' }).rows.length >= 2, '');
+  // 名单还原，不污染同库后续断言
+  db.setSetting(`family.members.${ledgerId}`, famSaved);
+
   console.log(`\n=== 结果：${pass} 通过 / ${fail} 失败 ===`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FATAL', e); process.exit(1); });

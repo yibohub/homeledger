@@ -224,6 +224,7 @@ function readTxnBody(ledgerId, body, { createdAccounts = [] } = {}) {
     note: body.note || '',
     merchant: body.merchant || '',
     tags: body.tags || '',
+    owner_label: body.owner_label || body.for_member || null,
     status: body.status === 'pending' ? 'pending' : 'cleared',
     is_reimbursable: body.is_reimbursable ? 1 : 0,
     splits,

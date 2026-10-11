@@ -401,7 +401,59 @@ function buildContext(ledgerId) {
     `SELECT u.display_name AS name FROM ledger_members m JOIN users u ON u.id = m.user_id WHERE m.ledger_id = ?`,
     ledgerId
   );
-  return { cats, expensePaths, incomePaths, accounts, members, habits: buildHabitSummary(ledgerId) };
+  return { cats, expensePaths, incomePaths, accounts, members, family: familyMembers(ledgerId), habits: buildHabitSummary(ledgerId) };
+}
+
+/* ------------------------- 消费归属人（P11） ------------------------- */
+
+/** 归属人标签清洗：去首尾/内部空白、全角空格归一，截 20 字 */
+function cleanOwnerLabel(raw) {
+  const s = String(raw || '').replace(/[\s\u3000]+/g, '').trim();
+  return s ? s.slice(0, 20) : null;
+}
+
+/**
+ * 归属人候选名单（P11 决策：手动维护 + 历史自动沉淀混合）：
+ * 手动名单存 settings（family.members.<ledgerId>，JSON 数组）；沉淀 = 该账本流水里
+ * 出现过的 distinct owner_label 按频次排序。手动名单在前（维护者优先），去重合并。
+ */
+function familyMembers(ledgerId, { limit = 30, manualOnly = false } = {}) {
+  const manual = (() => {
+    try {
+      const v = getSetting(`family.members.${ledgerId}`, '[]');
+      const arr = JSON.parse(v);
+      return Array.isArray(arr) ? arr.map(cleanOwnerLabel).filter(Boolean) : [];
+    } catch { return []; }
+  })();
+  if (manualOnly) return manual;
+  const sediment = all(
+    `SELECT owner_label AS label, COUNT(*) AS cnt FROM transactions
+     WHERE ledger_id = ? AND deleted_at IS NULL AND owner_label IS NOT NULL AND owner_label != ''
+     GROUP BY owner_label ORDER BY cnt DESC LIMIT ?`,
+    ledgerId, limit
+  ).map((r) => r.label);
+  const seen = new Set();
+  const out = [];
+  for (const name of [...manual, ...sediment]) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/** 商户→归属人习惯（与 habitCategoryId 同款窗口与阈值） */
+function habitOwnerId(ledgerId, merchant) {
+  if (!merchant) return null;
+  const r = get(
+    `SELECT owner_label AS label, COUNT(*) AS cnt FROM transactions
+     WHERE ledger_id = ? AND deleted_at IS NULL AND merchant = ? AND txn_date >= ?
+       AND owner_label IS NOT NULL AND owner_label != ''
+     GROUP BY owner_label ORDER BY cnt DESC LIMIT 1`,
+    ledgerId, String(merchant).slice(0, 60), habitSince()
+  );
+  return r && Number(r.cnt) >= 2 ? r.label : null;
 }
 
 /**
@@ -449,9 +501,24 @@ function buildHabitSummary(ledgerId) {
     .sort((x, y) => y.cnt - x.cnt).slice(0, 5)
     .map((r) => `${r.merchant}→${pathOf(r)}`);
 
+  // 商户→归属人（P11）：「口腔医院→老妈」这类稳定跟随关系，供模型源头对齐 + normalizeItem 兜底
+  const ownerRows = all(
+    `SELECT merchant, owner_label, COUNT(*) AS cnt FROM transactions
+     WHERE ledger_id = ? AND deleted_at IS NULL AND txn_date >= ?
+       AND merchant IS NOT NULL AND merchant != '' AND owner_label IS NOT NULL AND owner_label != ''
+     GROUP BY merchant, owner_label ORDER BY cnt DESC`,
+    ledgerId, since
+  );
+  const topOwnerByMerch = new Map();
+  for (const r of ownerRows) if (!topOwnerByMerch.has(r.merchant)) topOwnerByMerch.set(r.merchant, r);
+  const ownerHints = [...topOwnerByMerch.values()].filter((r) => r.cnt >= 2)
+    .sort((x, y) => y.cnt - x.cnt).slice(0, 5)
+    .map((r) => `${r.merchant}→${r.owner_label}（归属人）`);
+
   const parts = [];
   if (catHints.length) parts.push(`分类→常用账户：${catHints.join('、')}`);
   if (merchHints.length) parts.push(`商户→常记分类：${merchHints.join('、')}`);
+  if (ownerHints.length) parts.push(`商户→归属人：${ownerHints.join('、')}`);
   return parts.join('；');
 }
 
@@ -464,9 +531,10 @@ const SYSTEM_PROMPT = `你是一个专业的记账助手，负责把「账单截
 5. type 只能取：expense（支出）、income（收入）、transfer（转账）。
 6. category_name 必须从给定的分类列表中选择最贴近的「完整路径」，若都不合适则选「其他支出/其他」这类兜底项。
 7. 只有账单原文里明确写出了付款方式（如「支付宝」「微信」「现金」「银行卡」等字样），acct 才填对应账户名；原文没有提到付款方式时 acct 必须留空字符串，绝不要猜测或按常识默认。
-8. confidence 为 0~1 的小数，表示你对这笔提取的把握。
+8. for_member 是「这笔钱为谁花/为谁办」（如给老妈买药→"老妈"，与谁记账无关）：只从给出的「消费归属人候选」名单里选一个最匹配的，原文没有提到任何家人时必须留空字符串，绝不要用记账用户名单来填。
+9. confidence 为 0~1 的小数，表示你对这笔提取的把握。
 输出格式：
-{"items":[{"type":"expense","amount":35.00,"txn_date":"2026-09-15","merchant":"肯德基","note":"午餐","category_name":"餐饮/午餐","acct":"支付宝","currency":"CNY","confidence":0.95}]}`;
+{"items":[{"type":"expense","amount":35.00,"txn_date":"2026-09-15","merchant":"肯德基","note":"午餐","category_name":"餐饮/午餐","acct":"支付宝","for_member":"","currency":"CNY","confidence":0.95}]}`;
 
 function buildUserPrompt({ text, ctx, today }) {
   return [
@@ -475,7 +543,8 @@ function buildUserPrompt({ text, ctx, today }) {
     `可选收入分类（完整路径）：${ctx.incomePaths.join('、')}`,
     `可用账户：${ctx.accounts.map((a) => a.name).join('、') || '（无）'}`,
     ...(ctx.habits ? [`该用户的历史习惯（从其过往记账统计得出，仅供参考；账单原文有明确信息的以原文为准）：${ctx.habits}`] : []),
-    `账本成员：${ctx.members.map((m) => m.name).join('、') || '（无）'}`,
+    `记账用户（登录账号，只代表谁记的这笔账，for_member 不要从这里选）：${ctx.members.map((m) => m.name).join('、') || '（无）'}`,
+    ...(ctx.family.length ? [`消费归属人候选（for_member 只能从这里选）：${ctx.family.join('、')}`] : []),
     text ? `需要识别的账单文字：\n${text}` : '请识别随附的账单截图。若有多张图片，请合并提取所有交易。',
   ].join('\n');
 }
@@ -643,6 +712,18 @@ function normalizeItem(raw, ledgerId, { sourceText = '' } = {}) {
   }
   // 账户识别不出 → 习惯推荐补位（此时 categoryId 可能刚由习惯/关键词得出，正好作为推荐依据）
   const accountRec = !accountId ? habitAccountId(ledgerId, { categoryId, merchant, type }) : null;
+
+  // 消费归属人（P11）：模型给的就用（文本路径做臆造核验）；没给时商户习惯补位（可确认可改）
+  let ownerLabel = cleanOwnerLabel(raw.for_member || raw.owner_label);
+  if (ownerLabel && sourceText && !sourceText.includes(ownerLabel)) {
+    // 与账户同款臆造核验：文本记账时归属人称呼必须出现在原文（截图不受限——模型看得到账单）
+    ownerLabel = null;
+  }
+  let ownerRecommended = false;
+  if (!ownerLabel) {
+    const rec = habitOwnerId(ledgerId, merchant);
+    if (rec) { ownerLabel = rec; ownerRecommended = true; }
+  }
   return {
     draft_id: uid(10),
     type,
@@ -657,6 +738,8 @@ function normalizeItem(raw, ledgerId, { sourceText = '' } = {}) {
     account_id: accountId || accountRec,
     account_name: acctHint || null,
     account_recommended: !accountId && !!accountRec,
+    owner_label: ownerLabel,
+    owner_recommended: ownerRecommended,
     confidence: Number.isFinite(Number(raw.confidence)) ? Number(raw.confidence) : 0.8,
     raw,
   };
@@ -817,6 +900,7 @@ module.exports = {
   classifyByKeywords, guessAccountName, parseDateWords, parseTextByRules,
   resolveCategoryId, resolveAccountId, normalizeItem, buildContext,
   habitAccountId, habitCategoryId, buildHabitSummary, buildUserPrompt,
+  familyMembers, habitOwnerId, cleanOwnerLabel,
   extractAmount, cleanMerchant, callModel, listModels, guessVision, extractJson,
   isHeaderSafe, isMaskedSecret, sanitizeSecret,
 };

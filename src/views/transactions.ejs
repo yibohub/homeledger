@@ -66,6 +66,10 @@
       <option value="">全部成员</option>
       <% form.members.forEach(function(m){ %><option value="<%= m.user_id %>" <%= Number(f.memberId) === Number(m.user_id) ? 'selected' : '' %>><%= m.display_name %></option><% }); %>
     </select></div>
+    <% // P11 归属人筛选：候选 = 手动名单 + 流水沉淀（ai.familyMembers），可输任意值 %>
+    <div class="field"><input type="search" name="owner" value="<%= f.owner %>" list="owner-list" placeholder="归属人（为谁花）">
+      <datalist id="owner-list"><% (family || []).forEach(function(n){ %><option value="<%= n %>"></option><% }); %></datalist>
+    </div>
     <div class="field"><select name="sort">
       <option value="date_desc" <%= f.sort === 'date_desc' ? 'selected' : '' %>>最新在前</option>
       <option value="date_asc" <%= f.sort === 'date_asc' ? 'selected' : '' %>>最早在前</option>
@@ -73,7 +77,7 @@
       <option value="amount_asc" <%= f.sort === 'amount_asc' ? 'selected' : '' %>>金额从小到大</option>
     </select></div>
     <div class="field"><button class="btn btn-primary" type="submit">筛选</button></div>
-    <% if (f.keyword || f.type || f.kind || f.categoryId || f.accountId || f.memberId || f.month || f.from || f.to || f.source || f.reimbursable) { %>
+    <% if (f.keyword || f.type || f.kind || f.categoryId || f.accountId || f.memberId || f.owner || f.month || f.from || f.to || f.source || f.reimbursable) { %>
       <div class="field"><a class="btn btn-ghost" href="/transactions">清空</a></div>
     <% } %>
   </form>

@@ -106,6 +106,13 @@
           <textarea name="note" rows="2" placeholder="补充说明，例如：和同事聚餐"><%= t.note || '' %></textarea>
         </div>
 
+        <% // P11 归属人：这笔钱为谁花（与记账人/成员无关）；候选 = 手动名单 + 流水沉淀 %>
+        <div class="field">
+          <label>归属人 <span class="muted tiny">（这笔钱为谁花，例如：老妈；可留空）</span></label>
+          <input type="text" name="owner_label" value="<%= t.owner_label || '' %>" list="txn-owner-list" placeholder="例如：老妈 / 老爸">
+          <datalist id="txn-owner-list"><% (family || []).forEach(function(n){ %><option value="<%= n %>"></option><% }); %></datalist>
+        </div>
+
         <div class="row wrap" style="gap:12px">
           <div class="field" style="flex:1;min-width:150px">
             <label>标签</label>

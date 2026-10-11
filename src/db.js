@@ -443,6 +443,8 @@ const migrated = [];
 if (ensureColumn('transactions', 'subscription_id', 'INTEGER')) migrated.push('transactions.subscription_id');
 if (ensureColumn('users', 'avatar_path', 'TEXT')) migrated.push('users.avatar_path');
 if (ensureColumn('users', 'avatar_ver', 'INTEGER')) migrated.push('users.avatar_ver');
+// P11 消费归属人：这笔钱为谁花（自由文本标签，如「老妈」），与 user_id（谁记的）、splits（谁摊）互不替代
+if (ensureColumn('transactions', 'owner_label', 'TEXT')) migrated.push('transactions.owner_label');
 if (migrated.length) console.log(`[db] 已补齐字段：${migrated.join('、')}`);
 // 订阅扣费生成的流水按订阅维度回查（必须在 ensureColumn 之后建索引）
 db.exec('CREATE INDEX IF NOT EXISTS idx_txn_subscription ON transactions(subscription_id);');

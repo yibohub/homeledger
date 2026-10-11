@@ -47,6 +47,24 @@
   </div>
 
   <div>
+    <% // P11 消费归属人：这笔钱为谁花（如「老妈」）；名单供 AI 提取候选与各处 datalist %>
+    <div class="card">
+      <div class="card-head"><h2>家庭成员（归属人）</h2><span class="muted small">AI 记账自动识别「为谁花」</span></div>
+      <form method="post" action="/members/family">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <div class="field">
+          <label>名单（顿号或逗号分隔）</label>
+          <input type="text" name="names" value="<%= (familyManual || []).join('、') %>" placeholder="例如：老爸、老妈、红霞、小明" />
+        </div>
+        <div class="tiny muted mb8">记账时提到这些称呼（如「给老妈买药 50 元」）会自动填归属人；流水里用过的归属人也会自动成为候选。家庭成员不必注册账号。</div>
+        <% if (canManage(ledger.role)) { %>
+        <button class="btn btn-sm btn-primary" type="submit">保存名单</button>
+        <% } else { %>
+        <div class="tiny muted">仅管理员可修改</div>
+        <% } %>
+      </form>
+    </div>
+
     <div class="card">
       <div class="card-head"><h2>邀请新成员</h2></div>
       <% if (!canManage(ledger.role)) { %>

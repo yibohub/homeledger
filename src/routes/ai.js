@@ -69,6 +69,7 @@ router.post('/api/ai/scan', auth.requireLogin, auth.requireLedgerWrite, async (r
       engine: result.engine,
       model: result.model || null,
       items,
+      family: ai.familyMembers(ledgerId),
       images: saved,
       warnings: result.warnings || [],
       autoSave: ai.getAiConfig().autoSave,
@@ -101,6 +102,7 @@ router.post('/api/ai/confirm', auth.requireLogin, auth.requireLedgerWrite, (req,
         merchant: it.merchant || '',
         tags: it.tags || '',
         is_reimbursable: it.is_reimbursable ? 1 : 0,
+        owner_label: it.owner_label || null,
         source: req.body.source || 'ai_screenshot',
         ai_json: JSON.stringify(it.raw || it).slice(0, 4000),
       });
@@ -179,6 +181,7 @@ router.post('/api/ai/text', auth.requireLogin, async (req, res) => {
         // 草稿卡要显示「推荐了哪个账户」；习惯推荐的账户在此按 id 解析出名字
         account_name_resolved: accounts.find((a) => Number(a.id) === Number(it.account_id))?.name || '',
       })),
+      family: ai.familyMembers(ledgerId),
     });
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
@@ -259,6 +262,7 @@ router.post('/api/ai/chat', auth.requireLogin, async (req, res) => {
           merchant: it.merchant || '',
           tags: it.tags || '',
           is_reimbursable: it.is_reimbursable ? 1 : 0,
+          owner_label: it.owner_label || null,
           source: 'ai_chat',
           ai_json: JSON.stringify(it.raw || it).slice(0, 4000),
         }));

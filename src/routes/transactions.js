@@ -31,6 +31,7 @@ function readForm(body) {
     txn_date: body.txn_date || todayStr(),
     note: body.note || '',
     merchant: body.merchant || '',
+    owner_label: body.owner_label || null,
     status: body.status || 'cleared',
     is_reimbursable: body.is_reimbursable ? 1 : 0,
     tags: body.tags || '',
@@ -58,6 +59,7 @@ router.get('/', auth.requireLogin, (req, res) => {
     categoryId: req.query.category_id ? Number(req.query.category_id) : null,
     accountId: req.query.account_id ? Number(req.query.account_id) : null,
     memberId: req.query.member_id ? Number(req.query.member_id) : null,
+    owner: req.query.owner ? String(req.query.owner).slice(0, 20) : '',
     tagId: req.query.tag_id ? Number(req.query.tag_id) : null,
     source: req.query.source || '',
     month: req.query.month || '',
@@ -74,6 +76,7 @@ router.get('/', auth.requireLogin, (req, res) => {
   res.render('transactions', {
     title: '账单明细', activeNav: 'transactions',
     f, result, groups: txn.groupByDate(result.rows), form,
+    family: require('../lib/ai').familyMembers(ledgerId),
     totalPages: result.pages,
   });
 });
@@ -105,6 +108,7 @@ router.get('/new', auth.requireLogin, auth.requireLedgerWrite, (req, res) => {
   res.render('txn-form', {
     title: '记一笔', activeNav: 'new', mode: 'create', form, t: prefill,
     splitRows: [], splits: [], back: req.query.back || '/transactions',
+    family: require('../lib/ai').familyMembers(ledgerId),
   });
 });
 
@@ -125,6 +129,7 @@ router.post('/', auth.requireLogin, auth.requireLedgerWrite, (req, res) => {
       title: '记一笔', activeNav: 'new', mode: 'create', form,
       t: { ...data, amount: (data.amount_cents / 100).toFixed(2) },
       splitRows: data.splits, splits: [], back: safeBack(req.body.back), error: e.message,
+      family: require('../lib/ai').familyMembers(ledgerId),
     });
   }
 });
@@ -208,6 +213,7 @@ router.get('/:id/edit', auth.requireLogin, auth.requireLedgerWrite, (req, res) =
     splits: txn.splitsOf(t.id),
     images: att.listByTxn(t.id),
     back: req.query.back || '/transactions',
+    family: require('../lib/ai').familyMembers(ledgerId),
   });
 });
 
@@ -227,6 +233,7 @@ router.post('/:id', auth.requireLogin, auth.requireLedgerWrite, (req, res) => {
       title: '编辑记录', activeNav: 'transactions', mode: 'edit', form,
       t: { ...t, ...data, amount: (data.amount_cents / 100).toFixed(2) },
       splitRows: data.splits, splits: data.splits, back: safeBack(req.body.back), error: e.message,
+      family: require('../lib/ai').familyMembers(ledgerId),
     });
   }
 });

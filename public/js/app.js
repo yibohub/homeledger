@@ -443,6 +443,10 @@
     }
 
     function renderDrafts(data) {
+      // 归属人候选（P11）：接口下发 family，存全局供 datalist 用（不覆盖已存值）
+      if (Array.isArray(data.family)) {
+        window.__AI_FAMILY__ = Array.from(new Set([].concat(window.__AI_FAMILY__ || [], data.family)));
+      }
       const engines = { llm: 'AI 视觉模型', rule: '内置规则引擎' };
       let html = '';
       html += '<div class="row between mb12"><h2>识别结果（' + data.items.length + ' 笔）</h2>' +
@@ -473,8 +477,11 @@
             '</select></div>' +
             '<div class="field"><label>分类' + (it.category_recommended ? ' <span class="ai-hint">按习惯推荐</span>' : '') + '</label><select class="d-category"></select></div>' +
             '<div class="field"><label>账户' + (it.account_recommended ? ' <span class="ai-hint">按习惯推荐</span>' : '') + '</label><select class="d-account"></select></div>' +
-            '<div class="field"><label>商家 / 备注</label><input type="text" class="d-note" value="' + esc((it.merchant || '') + (it.note && it.note !== it.merchant ? ' ' + it.note : '')) + '"></div>' +
+            '<div class="field"><label>商家</label><input type="text" class="d-merchant" value="' + esc(it.merchant || '') + '"></div>' +
+            '<div class="field" style="flex:2"><label>备注</label><input type="text" class="d-note" value="' + esc(it.note || '') + '"></div>' +
+            '<div class="field"><label>归属人' + (it.owner_recommended ? ' <span class="ai-hint">按习惯推荐</span>' : '') + '</label><input type="text" class="d-owner" list="ai-owner-list" value="' + esc(it.owner_label || '') + '" placeholder="为谁花，可留空"></div>' +
           '</div>' +
+          '<datalist id="ai-owner-list">' + (window.__AI_FAMILY__ || []).concat(it.owner_label ? [it.owner_label] : []).filter(function(v, i, a) { return v && a.indexOf(v) === i; }).map(function(n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist>',
         '</div>';
       });
       html += '<div class="row mt16"><button type="submit" class="btn btn-primary btn-lg" id="ai-save">确认并保存 ' + data.items.length + ' 笔</button>' +
@@ -522,8 +529,9 @@
           txn_date: $('.d-date', card).value,
           category_id: $('.d-category', card).value || null,
           account_id: $('.d-account', card).value || null,
-          note: $('.d-note', card).value,
-          merchant: $('.d-note', card).value,
+          merchant: $('.d-merchant', card).value.trim(),
+          note: $('.d-note', card).value.trim(),
+          owner_label: ($('.d-owner', card).value || '').trim() || null,
         })).filter((it) => it.amount_cents > 0);
         if (!items.length) return toast('请至少保留一笔有效金额', 'warn');
         const saveBtn = $('#ai-save');

@@ -333,7 +333,7 @@ const formCsrf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[
   check('导出 CSV 200 且带 UTF-8 BOM', r.status === 200 && r.text.startsWith('\uFEFF'), `HTTP ${r.status}`);
   const exportCsv = r.text.replace(/^\uFEFF/, '');
   const csvLines = exportCsv.trim().split(/\r?\n/);
-  check('导出表头 16 列且含 type_key', csvLines[0].split(',').length === 16 && csvLines[0].includes('type_key'), csvLines[0].slice(0, 60));
+  check('导出表头 17 列且含 type_key/归属人（P11）', csvLines[0].split(',').length === 17 && csvLines[0].includes('type_key') && csvLines[0].includes('归属人'), csvLines[0].slice(0, 60));
   check('导出行数与种子一致', csvLines.length - 1 === CASES.length, `${csvLines.length - 1} 行`);
   const exportB64 = Buffer.from(exportCsv, 'utf8').toString('base64');
 
