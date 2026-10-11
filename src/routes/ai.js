@@ -115,6 +115,12 @@ router.post('/api/ai/confirm', auth.requireLogin, auth.requireLedgerWrite, (req,
   // 附件关联：数量一致时一一对应，否则全部挂到第一笔
   const linked = att.linkImagesToTxns({ ledgerId, imageIds, txnIds: created });
 
+  // P12 习惯反馈：推荐被改掉的草稿记负反馈（习惯统计退火 + 词表扣分）
+  ai.recordDraftFeedback(ledgerId, items);
+  // P13 词表沉淀：确认的分类是用户有意识的选择（失败笔未入库，重估只是刷新既有计数）
+  const dict = require('../lib/dict');
+  for (const it of items) dict.sediment(ledgerId, it.merchant);
+
   auth.audit(req, 'ai.confirm', { ledgerId, detail: `入库 ${created.length} 笔，失败 ${errors.length}` });
   res.json({ ok: created.length > 0, created: created.length, ids: created, linked, errors, redirect: errors.length ? null : '/transactions' });
 });

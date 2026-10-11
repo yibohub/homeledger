@@ -488,6 +488,8 @@
         '<button type="button" class="btn btn-ghost" id="ai-clear">清空重来</button>' +
         '<span class="muted small" id="ai-save-hint"></span></div></form>';
       resultBox.innerHTML = html;
+      // P12：草稿留档，提交时按卡片索引回取「识别时的推荐快照」
+      resultBox.__drafts = data.items;
 
       // 填充下拉
       const cfg = window.__AI_FORM__ || { categories: [], accounts: [] };
@@ -523,16 +525,21 @@
       const confirmForm = $('#ai-confirm-form');
       confirmForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const items = $$('.draft', resultBox).map((card) => ({
-          type: $('.d-type', card).value,
-          amount_cents: Math.round(parseFloat($('.d-amount', card).value || '0') * 100),
-          txn_date: $('.d-date', card).value,
-          category_id: $('.d-category', card).value || null,
-          account_id: $('.d-account', card).value || null,
-          merchant: $('.d-merchant', card).value.trim(),
-          note: $('.d-note', card).value.trim(),
-          owner_label: ($('.d-owner', card).value || '').trim() || null,
-        })).filter((it) => it.amount_cents > 0);
+        const items = $$('.draft', resultBox).map((card) => {
+          const d = (resultBox.__drafts || [])[Number(card.dataset.i)] || {};
+          return {
+            type: $('.d-type', card).value,
+            amount_cents: Math.round(parseFloat($('.d-amount', card).value || '0') * 100),
+            txn_date: $('.d-date', card).value,
+            category_id: $('.d-category', card).value || null,
+            account_id: $('.d-account', card).value || null,
+            merchant: $('.d-merchant', card).value.trim(),
+            note: $('.d-note', card).value.trim(),
+            owner_label: ($('.d-owner', card).value || '').trim() || null,
+            // P12：识别时的推荐快照（编辑前的原值），服务端据此记习惯负反馈
+            rec_snapshot: { category_id: d.category_id, account_id: d.account_id, owner_label: d.owner_label || null },
+          };
+        }).filter((it) => it.amount_cents > 0);
         if (!items.length) return toast('请至少保留一笔有效金额', 'warn');
         const saveBtn = $('#ai-save');
         saveBtn.disabled = true;

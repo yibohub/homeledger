@@ -7,6 +7,7 @@ const txn = require('../lib/txn');
 const fd = require('../lib/formdata');
 const u = require('../lib/util');
 const att = require('../lib/attachments');
+const dict = require('../lib/dict');
 
 const router = express.Router();
 
@@ -118,6 +119,8 @@ router.post('/', auth.requireLogin, auth.requireLedgerWrite, (req, res) => {
   const wantsJson = req.body._json === '1' || (req.headers.accept || '').includes('application/json');
   try {
     const id = txn.createTransaction(ledgerId, req.session.userId, data);
+    // P13：手动选的分类是用户有意识的判断，触发个人词表沉淀（≥3 次 80% 稳定才入表；失败不影响记账）
+    dict.sediment(ledgerId, data.merchant);
     auth.audit(req, 'txn.create', { entity: 'transaction', entityId: id, ledgerId, detail: `${data.type} ${(data.amount_cents / 100).toFixed(2)}` });
     if (wantsJson) return res.json({ ok: true, id, redirect: '/transactions' });
     res.flash('success', '已记一笔 ✓');

@@ -61,6 +61,8 @@ router.get('/settings', auth.requireLogin, (req, res) => {
     isAdmin,
     newToken,
     admin: adminData,
+    // P13 个人词表：本账本沉淀的「商户→分类」稳定映射，设置页可查看可删除（可解释、可遗忘）
+    dictEntries: res.locals.ledger ? require('../lib/dict').listActive(Number(res.locals.ledger.id)) : [],
     apiTokens: all(
       `SELECT id, name, token_tail, last_used_at, created_at FROM api_tokens
        WHERE user_id = ? AND revoked_at IS NULL ORDER BY id DESC`,
@@ -211,8 +213,21 @@ router.get('/theme/:mode', auth.requireLogin, (req, res) => {
   res.redirect(req.get('referer') || '/');
 });
 
-router.post('/settings/ai', auth.requireLogin, require('../lib/auth').requireAdmin, async (req, res) => {
-  const keys = ['ai.enabled', 'ai.base_url', 'ai.api_key', 'ai.model', 'ai.vision', 'ai.timeout_ms', 'ai.auto_save'];
+/* ------------------------- P13 个人词表：逐条删除 ------------------------- */
+
+// 词表来自本账本历史沉淀，任何登录成员可删（影响的是 AI 兜底推荐，非账目数据）
+router.post('/settings/dict/delete', auth.requireLogin, (req, res) => {
+  const ledger = res.locals.ledger;
+  if (!ledger) return res.redirect('/settings#ai');
+  const kw = String(req.body.kw || '').slice(0, 60);
+  const kind = req.body.kind === 'income' ? 'income' : 'expense';
+  if (require('../lib/dict').dismiss(Number(ledger.id), kw, kind)) {
+    auth.audit(req, 'dict.dismiss', { ledgerId: Number(ledger.id), detail: `删除词表映射 ${kw}（${kind}）` });
+  }
+  res.redirect('/settings#ai');
+});
+
+router.post('/settings/ai', auth.requireLogin, require('../lib/auth').requireAdmin, async (req, res) => {  const keys = ['ai.enabled', 'ai.base_url', 'ai.api_key', 'ai.model', 'ai.vision', 'ai.timeout_ms', 'ai.auto_save'];
   const before = ai.getAiConfig();
   const rawKey = String(req.body['ai.api_key'] == null ? '' : req.body['ai.api_key']).trim();
   if (req.body.clear_api_key) {

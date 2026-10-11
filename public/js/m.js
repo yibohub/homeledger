@@ -459,6 +459,8 @@
       ok.textContent = '入库中…';
       try {
         const item = { ...it };
+        // P12：先留一份识别时的推荐快照（在应用下面的编辑之前），确认时供服务端比对「推荐是否被改掉」
+        item.rec_snapshot = { category_id: it.category_id, account_id: it.account_id, owner_label: it.owner_label || null };
         item.amount_cents = Math.round(Math.max(0, parseFloat(amountIn.value || '0') || 0) * 100);
         if (dateIn.value) item.txn_date = dateIn.value;
         if (catSel && catSel.value) item.category_id = Number(catSel.value);

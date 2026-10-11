@@ -131,6 +131,34 @@
   <% } %>
 </div>
 
+<% if (dictEntries !== undefined && dictEntries.length) { %>
+<div class="card" id="dict" data-tab="ai">
+  <div class="card-head">
+    <h2>📖 个人词表（商户→分类）</h2>
+    <span class="chip"><%= dictEntries.length %> 条</span>
+  </div>
+  <div class="tiny muted" style="margin-bottom:10px">
+    从本账本历史自动沉淀：同一商户被记到同一分类 ≥3 次且占比 ≥80% 即入表，识别时优先于系统关键词表。
+    删除后不再自动恢复；推荐被你在草稿里改掉时也会自动失效。
+  </div>
+  <% dictEntries.forEach(function(e){ %>
+    <div class="row between" style="border-bottom:1px dashed var(--border);padding:8px 0;gap:10px;flex-wrap:wrap">
+      <div style="min-width:0">
+        <b><%= e.kw %></b> <span class="muted">→</span> <%= e.category_path %>
+        <span class="chip"><%= e.kind === 'income' ? '收入' : '支出' %></span>
+        <div class="tiny muted"><%= e.hits %> 笔 · <%= helpers.fmtDateTime(e.updated_at) %></div>
+      </div>
+      <form method="post" action="/settings/dict/delete">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <input type="hidden" name="kw" value="<%= e.kw %>">
+        <input type="hidden" name="kind" value="<%= e.kind %>">
+        <button class="btn btn-sm btn-ghost" type="submit">删除</button>
+      </form>
+    </div>
+  <% }) %>
+</div>
+<% } %>
+
 <div class="card" id="api" data-tab="api">
   <div class="card-head">
     <h2>🔑 开放 API（小龙虾 / 自动化）</h2>
