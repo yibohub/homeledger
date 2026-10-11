@@ -537,7 +537,7 @@
             note: $('.d-note', card).value.trim(),
             owner_label: ($('.d-owner', card).value || '').trim() || null,
             // P12：识别时的推荐快照（编辑前的原值），服务端据此记习惯负反馈
-            rec_snapshot: { category_id: d.category_id, account_id: d.account_id, owner_label: d.owner_label || null },
+            rec_snapshot: { category_id: d.category_id, account_id: d.account_id, owner_label: d.owner_label || null, type: d.type },
           };
         }).filter((it) => it.amount_cents > 0);
         if (!items.length) return toast('请至少保留一笔有效金额', 'warn');

@@ -731,17 +731,21 @@ function recordDraftFeedback(ledgerId, items) {
       const n = Number(v);
       return Number.isFinite(n) ? String(n) : String(v).trim();
     };
-    const normOwner = (v) => (v === null || v === undefined ? '' : String(v).trim());
+    const normOwner = (v) => (v === null || v === undefined ? '' : String(v).trim().slice(0, 20));
     for (const it of (items || [])) {
       const snap = it && it.rec_snapshot;
       if (!snap) continue;
       const merchant = String(it.merchant || '').trim().slice(0, 60);
       if (!merchant) continue;
-      const pairs = [
-        ['category', normId(snap.category_id), normId(it.category_id)],
-        ['account', normId(snap.account_id), normId(it.account_id)],
-        ['owner', normOwner(snap.owner_label), normOwner(it.owner_label)],
-      ];
+      // 类型被改（支出↔收入）时分类/账户跨 kind 比对没有意义，只比归属人（与类型无关）
+      const typeChanged = snap.type && it.type && String(snap.type) !== String(it.type);
+      const pairs = typeChanged
+        ? [['owner', normOwner(snap.owner_label), normOwner(it.owner_label)]]
+        : [
+            ['category', normId(snap.category_id), normId(it.category_id)],
+            ['account', normId(snap.account_id), normId(it.account_id)],
+            ['owner', normOwner(snap.owner_label), normOwner(it.owner_label)],
+          ];
       for (const [field, rec, fin] of pairs) {
         if (!rec || rec === fin) continue;
         run(

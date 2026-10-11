@@ -215,8 +215,9 @@ router.get('/theme/:mode', auth.requireLogin, (req, res) => {
 
 /* ------------------------- P13 个人词表：逐条删除 ------------------------- */
 
-// 词表来自本账本历史沉淀，任何登录成员可删（影响的是 AI 兜底推荐，非账目数据）
-router.post('/settings/dict/delete', auth.requireLogin, (req, res) => {
+// 词表是账本级共享数据且删除后永不自动复活（dismissed），对齐家庭名单同款管理权限；
+// 只读成员仍可在设置页查看（可解释），但不能单方面改全家的推荐行为
+router.post('/settings/dict/delete', auth.requireLogin, auth.requireLedgerManage, (req, res) => {
   const ledger = res.locals.ledger;
   if (!ledger) return res.redirect('/settings#ai');
   const kw = String(req.body.kw || '').slice(0, 60);
@@ -227,7 +228,8 @@ router.post('/settings/dict/delete', auth.requireLogin, (req, res) => {
   res.redirect('/settings#ai');
 });
 
-router.post('/settings/ai', auth.requireLogin, require('../lib/auth').requireAdmin, async (req, res) => {  const keys = ['ai.enabled', 'ai.base_url', 'ai.api_key', 'ai.model', 'ai.vision', 'ai.timeout_ms', 'ai.auto_save'];
+router.post('/settings/ai', auth.requireLogin, require('../lib/auth').requireAdmin, async (req, res) => {
+  const keys = ['ai.enabled', 'ai.base_url', 'ai.api_key', 'ai.model', 'ai.vision', 'ai.timeout_ms', 'ai.auto_save'];
   const before = ai.getAiConfig();
   const rawKey = String(req.body['ai.api_key'] == null ? '' : req.body['ai.api_key']).trim();
   if (req.body.clear_api_key) {

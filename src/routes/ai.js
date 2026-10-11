@@ -91,6 +91,8 @@ router.post('/api/ai/confirm', auth.requireLogin, auth.requireLedgerWrite, (req,
   const errors = [];
   for (const it of items) {
     try {
+      // 桌面路径提交对象无 raw：兜底留档时剥离客户端快照，保持 ai_json「识别原始结果」的口径
+      const { rec_snapshot, ...rest } = it;
       const id = txn.createTransaction(ledgerId, req.session.userId, {
         type: it.type || 'expense',
         amount_cents: Number(it.amount_cents) || 0,
@@ -104,7 +106,7 @@ router.post('/api/ai/confirm', auth.requireLogin, auth.requireLedgerWrite, (req,
         is_reimbursable: it.is_reimbursable ? 1 : 0,
         owner_label: it.owner_label || null,
         source: req.body.source || 'ai_screenshot',
-        ai_json: JSON.stringify(it.raw || it).slice(0, 4000),
+        ai_json: JSON.stringify(it.raw || rest).slice(0, 4000),
       });
       created.push(id);
     } catch (e) {

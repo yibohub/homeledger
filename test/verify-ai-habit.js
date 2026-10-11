@@ -405,6 +405,36 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
     Number(itD2.category_id) === Number(lunchCat) && itD2.category_recommended === true,
     `category_id=${itD2.category_id}`);
 
+  // 反馈扣分持久：demote 不被后续 sediment 重估抹掉（审查 P3-2 修复回归）
+  const merchantP = aiLib.cleanMerchant('乙持久站 20元');
+  for (let i = 0; i < 3; i++) {
+    txnLib.createTransaction(ledgerId, user.id, {
+      type: 'expense', amount_cents: 2000, account_id: wechat.id, category_id: fruitCat,
+      txn_date: db.todayStr(), merchant: merchantP, note: '', source: 'manual',
+    });
+  }
+  dictLib.sediment(ledgerId, merchantP);
+  dictLib.demote(ledgerId, merchantP, fruitCat);
+  check('词表扣分后有效分 3−2=1 仍存活（listActive 展示有效值）',
+    dictLib.listActive(ledgerId).some((e) => e.kw === merchantP && e.hits === 1));
+  txnLib.createTransaction(ledgerId, user.id, {
+    type: 'expense', amount_cents: 2000, account_id: wechat.id, category_id: fruitCat,
+    txn_date: db.todayStr(), merchant: merchantP, note: '', source: 'manual',
+  });
+  dictLib.sediment(ledgerId, merchantP); // 重估刷新 hits=4，penalty 应保留
+  check('sediment 重估不抹掉扣分（有效分 4−2=2）',
+    dictLib.listActive(ledgerId).some((e) => e.kw === merchantP && e.hits === 2));
+  dictLib.demote(ledgerId, merchantP, fruitCat);
+  check('再次扣分即失效（4−2−2<1 → dismissed）', !dictLib.listActive(ledgerId).some((e) => e.kw === merchantP));
+
+  // 类型被改（支出↔收入）时只比归属人（审查 P3-8 修复回归：跨 kind 分类/账户比对无意义）
+  aiLib.recordDraftFeedback(ledgerId, [{
+    type: 'income', merchant: '类型变更站', category_id: lunchCat, account_id: alipay.id, owner_label: '',
+    rec_snapshot: { type: 'expense', category_id: fruitCat, account_id: wechat.id, owner_label: '老妈' },
+  }]);
+  const rowsType = db.all('SELECT field FROM habit_feedback WHERE merchant = ?', '类型变更站');
+  check('类型变更只记归属人一条负反馈', rowsType.length === 1 && rowsType[0].field === 'owner', JSON.stringify(rowsType));
+
   // 没推荐过的字段被改不记反馈（其他兜底换成真分类不是惩罚）
   const beforeNoRec = Number(db.get('SELECT COUNT(*) AS c FROM habit_feedback').c);
   r = await req('POST', '/api/ai/confirm', {

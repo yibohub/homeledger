@@ -23,9 +23,15 @@ function save(ledgerId, list) {
   setSetting(`dict.categories.${ledgerId}`, JSON.stringify(list));
 }
 
+/** 条目有效分 = 历史笔数 − 反馈扣分（penalty 持久累计，不被后续 sediment 重估抹掉） */
+function effective(e) {
+  return e.hits - (e.penalty || 0);
+}
+
 /**
  * 记一笔后触发：重估该商户映射的成熟度，达标则入表/刷新笔数。
  * 已删（dismissed）条目不复活——用户明确否定过的映射不该自己爬回来。
+ * 刷新只更新 hits；penalty（推荐被改的扣分）跨重估保留，词表的「教训」不因新流水一笔勾销。
  */
 function sediment(ledgerId, merchant) {
   try {
@@ -70,13 +76,16 @@ function sediment(ledgerId, merchant) {
 }
 
 /**
- * 兜底链匹配：先商户全等（最准），再对「商户+备注+分类名」包含匹配（与系统表同口径）。
- * 只回仍存在的未归档分类；kind 不符跳过（支出/收入词表分开）。
+ * 兜底链匹配：先商户全等（最准），再对「商户+备注+分类名」做子串包含匹配——
+ * kw 是完整商户名（≥3 笔真实历史），比系统表的正则关键词更保守，过匹配面更小。
+ * 按有效分降序遍历（高频映射优先）；只回仍存在的未归档分类；kind 不符跳过（支出/收入分开）。
  */
 function lookup(ledgerId, merchant, text, kind) {
   const kw = String(merchant || '').trim().slice(0, 60);
   const hay = String(text || '');
-  const entries = load(ledgerId).filter((e) => !e.dismissed && e.kind === kind);
+  const entries = load(ledgerId)
+    .filter((e) => !e.dismissed && e.kind === kind)
+    .sort((a, b) => effective(b) - effective(a));
   const alive = (e) => get(
     'SELECT id FROM categories WHERE id = ? AND is_archived = 0 AND kind = ?', e.category_id, kind
   );
@@ -87,7 +96,7 @@ function lookup(ledgerId, merchant, text, kind) {
   return null;
 }
 
-/** P12 反馈联动：词表推荐的分类被用户改掉 → 扣分，扣穿即失效（dismissed，不自动复活） */
+/** P12 反馈联动：词表推荐的分类被用户改掉 → penalty +2，有效分扣穿即失效（dismissed，不自动复活） */
 function demote(ledgerId, merchant, categoryId) {
   try {
     const kw = String(merchant || '').trim().slice(0, 60);
@@ -95,15 +104,15 @@ function demote(ledgerId, merchant, categoryId) {
     const list = load(ledgerId);
     const hit = list.find((e) => e.kw === kw && !e.dismissed && Number(e.category_id) === Number(categoryId));
     if (!hit) return;
-    hit.hits -= 2;
-    if (hit.hits < 1) hit.dismissed = 1;
+    hit.penalty = (hit.penalty || 0) + 2;
+    if (effective(hit) < 1) hit.dismissed = 1;
     save(ledgerId, list);
   } catch (e) {
     console.error('[dict] 反馈扣分失败（不影响记账）:', e.message);
   }
 }
 
-/** 设置页展示：生效条目（带分类完整路径，可解释） */
+/** 设置页展示：生效条目（带分类完整路径；hits 展示扣除反馈罚分后的有效值，如实可解释） */
 function listActive(ledgerId) {
   return load(ledgerId)
     .filter((e) => !e.dismissed)
@@ -113,7 +122,7 @@ function listActive(ledgerId) {
          LEFT JOIN categories p ON p.id = c.parent_id WHERE c.id = ?`,
         e.category_id
       );
-      return { ...e, category_path: c ? (c.parent ? `${c.parent}/${c.cname}` : c.cname) : '（分类已删除）' };
+      return { ...e, hits: effective(e), category_path: c ? (c.parent ? `${c.parent}/${c.cname}` : c.cname) : '（分类已删除）' };
     })
     .sort((a, b) => b.hits - a.hits);
 }

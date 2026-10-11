@@ -285,10 +285,10 @@ scheduler 与 routes 共用，scheduler.js 已 360 行不再加）。scheduler.r
 
 **详设（2026-10-11 补齐，随第六批落地）**
 
-1. **信号采集**：草稿确认（`/api/ai/confirm`）时对比「识别时的推荐快照」与最终值。快照由前端在应用用户编辑**之前**写入 `rec_snapshot{category_id, account_id, owner_label}`（m.js 展开草稿时、app.js 提交时按卡片 `data-i` 索引回取）；旧缓存 JS 不带快照则自然跳过（优雅降级）。只有「推荐过且有值」的字段被改才记负反馈（没推荐不算改，避免把「其他兜底被换成真分类」当惩罚）；清空/换掉都算改。
+1. **信号采集**：草稿确认（`/api/ai/confirm`）时对比「识别时的推荐快照」与最终值。快照由前端在应用用户编辑**之前**写入 `rec_snapshot{category_id, account_id, owner_label, type}`（m.js 展开草稿时、app.js 提交时按卡片 `data-i` 索引回取）；旧缓存 JS 不带快照则自然跳过（优雅降级）。只有「推荐过且有值」的字段被改才记负反馈（没推荐不算改，避免把「其他兜底被换成真分类」当惩罚）；清空/换掉都算改。类型被改（支出↔收入）时分类/账户跨 kind 比对无意义，只比归属人（与类型无关）。
 2. **存储**：新表 `habit_feedback(ledger_id, merchant, field∈{category,account,owner}, recommended, confirmed, created_at)`，索引 (ledger_id, merchant, field)。写入时顺手清理 180 天前的旧行（反馈只在 90 天习惯窗内起作用，双窗防膨胀）。
 3. **加权**：习惯统计一律 `weight = COUNT(*) − 2 × 负反馈数`——habitCategoryId（商户→分类）、habitOwnerId（商户→归属人）、habitAccountId 的商户维度，以及 buildHabitSummary 的商户→分类/归属人提示词摘要（分类→账户维度无负反馈归属，不加权）。分类/账户映射 weight<1 出局、归属人维持 ≥2 门槛：被改一次即把仅有的 2 次正例扣穿，学错的模式立即退火；90 天后负反馈滑出窗口自然复活（若期间正例还在涨）。
-4. **P13 联动**：改掉「词表推荐」的分类时，对应词表条目 hits−2，扣穿即失效（dismissed），不再自动复活——词表只收「极稳」映射，活的部分交给习惯统计。
+4. **P13 联动**：改掉「词表推荐」的分类时，对应词表条目 penalty+2（有效分 = hits − penalty，**跨 sediment 重估保留**——新流水刷新 hits 不抹掉教训），有效分扣穿即失效（dismissed），不再自动复活——词表只收「极稳」映射，活的部分交给习惯统计。
 5. **边界**：悬浮球/对话自动入库（无人工评审时点）与确认后到流水页的后续编辑不产生反馈（前者没有比对时刻、后者跨页面归因复杂，先不做）；快照为客户端提供，仅影响本账本推荐质量，无安全面。纯统计零 token，无 Key 的规则引擎路径同样生效。
 
 **涉及**：db.js（habit_feedback 表）、lib/ai.js（习惯加权 + recordDraftFeedback）、routes/ai.js（confirm 比对）、m.js/app.js（快照）、verify-ai-habit 扩展。
@@ -303,7 +303,7 @@ scheduler 与 routes 共用，scheduler.js 已 360 行不再加）。scheduler.r
 
 1. **沉淀**：`settings['dict.categories.<ledgerId>']` JSON 数组，条目 `{kw, kind, category_id, hits, updated_at, dismissed}`。触发点 = 手动记一笔与 AI 草稿确认（用户有意识选过分类的时刻）；触发时重估该商户全历史（expense/income、分类未归档）：总笔数 ≥3 且主分类占比 ≥80% 才入表（「稳定映射」）。导入与开放 API 不触发（分类非本用户此刻的选择），但其流水计入统计基数。
 2. **匹配**：normalizeItem 兜底链新序——规则引擎给出的分类名（出自系统关键词表，`engine:'rule'` 可辨）视为统计猜测，**个人词表优先于它**（先商户全等、再对「商户+备注+分类名」包含匹配，与系统表同口径；kind 过滤、分类已归档跳过）；大模型读账单明确给出的分类名仍是识别结果，优先于词表。其后依次：系统关键词表 → 习惯统计 → 「其他」。命中即预选并带「按习惯推荐」标记。
-3. **可解释 / 可遗忘**：设置页 AI 区新卡「个人词表」逐条展示（商户→分类、笔数、更新时间）+ 逐条删除；删除置 dismissed=1 永不自动复活（防反复沉淀骚扰）；生效条目上限 200、已删条目保留上限 50（超出裁最旧）。
+3. **可解释 / 可遗忘**：设置页 AI 区新卡「个人词表」逐条展示（商户→分类、笔数为扣除反馈罚分后的有效值、更新时间）+ 逐条删除（requireLedgerManage，对齐家庭名单管理权限；只读成员可看不可删）；删除置 dismissed=1 永不自动复活（防反复沉淀骚扰）；生效条目上限 200、已删条目保留上限 50（超出裁最旧）。
 4. **误映射自愈**：P12 反馈扣穿（hits−2<1）自动失效；用户删词表后兜底链自然落回系统表/习惯/「其他」，不会卡死错误分类。纯统计零 token；词表内容（商户名+分类名）属既有出网白名单内，且本方案只走代码通道不进提示词（提示词通道已有 buildHabitSummary 商户→分类摘要覆盖）。
 
 **涉及**：lib/dict.js（新）、lib/ai.js（兜底链）、routes/transactions.js + routes/ai.js（沉淀触发）、admin.js + settings.ejs（管理卡）、verify-ai-habit 扩展。
