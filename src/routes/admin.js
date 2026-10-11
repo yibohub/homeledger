@@ -229,7 +229,7 @@ router.post('/settings/dict/delete', auth.requireLogin, auth.requireLedgerManage
 });
 
 router.post('/settings/ai', auth.requireLogin, require('../lib/auth').requireAdmin, async (req, res) => {
-  const keys = ['ai.enabled', 'ai.base_url', 'ai.api_key', 'ai.model', 'ai.vision', 'ai.timeout_ms', 'ai.auto_save'];
+  const keys = ['ai.enabled', 'ai.base_url', 'ai.api_key', 'ai.model', 'ai.vision', 'ai.timeout_ms', 'ai.auto_save', 'ai.sensitive_local_only'];
   const before = ai.getAiConfig();
   const rawKey = String(req.body['ai.api_key'] == null ? '' : req.body['ai.api_key']).trim();
   if (req.body.clear_api_key) {
@@ -248,6 +248,7 @@ router.post('/settings/ai', auth.requireLogin, require('../lib/auth').requireAdm
   setSetting('ai.enabled', req.body['ai.enabled'] ? 'true' : 'false');
   setSetting('ai.vision', req.body['ai.vision'] ? 'true' : 'false');
   setSetting('ai.auto_save', req.body['ai.auto_save'] ? 'true' : 'false');
+  setSetting('ai.sensitive_local_only', req.body['ai.sensitive_local_only'] ? 'true' : 'false');
   setSetting('ai.timeout_ms', String(Number(req.body['ai.timeout_ms']) || 90000));
   auth.audit(req, 'settings.ai', { detail: keys.join(',') });
   res.flash('success', 'AI 配置已保存');

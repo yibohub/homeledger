@@ -55,6 +55,8 @@ function getAiConfig() {
     vision: String(getSetting('ai.vision', 'true')) === 'true',
     autoSave: String(getSetting('ai.auto_save', 'false')) === 'true',
     timeoutMs: Number(getSetting('ai.timeout_ms', '90000')) || 90000,
+    // 敏感记账本地分流：命中收入/资金类关键词的文字记账不发送模型服务（维护者提议，默认开）
+    sensitiveLocalOnly: String(getSetting('ai.sensitive_local_only', 'true')) === 'true',
   };
 }
 
@@ -936,14 +938,28 @@ function normalizeItem(raw, ledgerId, { sourceText = '' } = {}) {
  * @param {string} o.text
  * @param {number} o.ledgerId
  */
+/**
+ * 敏感记账本地分流的判定词表（收入/资金类——出网敏感性分级里最高的一档）。
+ * 刻意不含退款/红包：低敏高频，误伤成本大于收益。
+ * 与 KEYWORD_RULES 收入段对齐但用途不同：那边是分类，这边是出网预检。
+ */
+const SENSITIVE_LOCAL_RE = /(工资|薪资|薪水|月薪|发薪|代发|年终奖|绩效|公积金|分红|股息|利息|结息|理财|赎回|房租收|收租|稿费|外快|兼职|理赔|报销)/i;
+
 async function analyzeBill({ images = [], text = '', ledgerId }) {
   const cfg = getAiConfig();
   const ctx = buildContext(ledgerId);
   const today = todayStr();
   const warnings = [];
 
+  // 0) 敏感分流（维护者提议，默认开，设置页可关）：纯文字且命中收入/资金类关键词 →
+  //    不发送模型服务，直接走本地规则链。截图路径不受控（图片无法本地内容过滤）。
+  const sensitiveLocal = !images.length && text && cfg.sensitiveLocalOnly && SENSITIVE_LOCAL_RE.test(text);
+  if (sensitiveLocal) {
+    warnings.push('含敏感信息（收入/资金类关键词），已用本地规则识别，内容未发送至模型服务（设置 → AI 记账可关闭此分流）。');
+  }
+
   // 1) 有模型且（有图 or 想更聪明的文本解析）→ 走大模型
-  const canUseModel = isAiUsable() && ((images.length > 0 && cfg.vision) || text);
+  const canUseModel = isAiUsable() && ((images.length > 0 && cfg.vision) || (text && !sensitiveLocal));
   if (canUseModel) {
     try {
       const content = [{ type: 'text', text: buildUserPrompt({ text, ctx, today }) }];
