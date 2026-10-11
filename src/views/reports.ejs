@@ -193,6 +193,24 @@
       <% }); %>
     <% } %>
   </div>
+
+  <% // P11 归属人统计：这笔钱为谁花（AI 记账提取的标签，与成员=谁记账互补） %>
+  <div class="card">
+    <div class="card-head"><h2>归属人消费</h2><span class="muted small">这笔钱为谁花 · <a class="tiny" href="/transactions?owner=">筛选归属人</a></span></div>
+    <% if (!owners.length) { %>
+      <div class="empty"><span class="big">🏷️</span>还没有带归属人的账目<small class="muted"><br>AI 记账时说「给老妈买药 50 元」会自动带上归属人，也可在记一笔/编辑里填写</small></div>
+    <% } else { %>
+      <% owners.forEach(function(o){ %>
+        <div class="mb12">
+          <div class="row between small">
+            <span>🏷️ <%= o.label %></span>
+            <span class="muted"><%= o.cnt %> 笔 · 支出 <b class="amount expense"><%= helpers.fmtAmount(o.expense) %></b><% if (o.income > 0) { %> · 收入 <b class="amount income"><%= helpers.fmtAmount(o.income) %></b><% } %></span>
+          </div>
+          <div class="mt8"><%- charts.progressBar(o.expense, Math.max.apply(null, owners.map(function(x){ return Number(x.expense); }).concat([1]))) %></div>
+        </div>
+      <% }); %>
+    <% } %>
+  </div>
 </div>
 
 <div class="card">

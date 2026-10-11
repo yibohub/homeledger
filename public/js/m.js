@@ -303,6 +303,17 @@
     draftsEl.insertBefore(card, draftsEl.firstChild);
   }
 
+  // 草稿卡可编辑字段（对齐桌面卡，维护者反馈：只有账户可改不够，备注还不展示）。
+  // 分类候选由服务端注入 mCats（id/path/kind），归属人候选 mFamily（datalist）
+  function fieldRow(labelText, inputEl) {
+    const row = document.createElement('div');
+    row.className = 'm-draft-acc-row';
+    const label = document.createElement('span');
+    label.textContent = labelText;
+    row.appendChild(label);
+    row.appendChild(inputEl);
+    return row;
+  }
   function draftCard(it) {
     const income = it.type === 'income';
     const card = document.createElement('div');
@@ -318,24 +329,50 @@
     head.appendChild(amt);
     card.appendChild(head);
 
-    const sub = document.createElement('div');
-    sub.className = 'm-draft-sub';
-    sub.textContent = [
-      it.category_path || '未分类',
-      it.txn_date || '',
-    ].filter(Boolean).join(' · ');
-    card.appendChild(sub);
+    // 金额（可改）：数字键盘
+    const amountIn = document.createElement('input');
+    amountIn.type = 'number';
+    amountIn.inputMode = 'decimal';
+    amountIn.step = '0.01';
+    amountIn.min = '0';
+    amountIn.className = 'm-draft-acc';
+    amountIn.value = (it.amount_cents / 100).toFixed(2);
+    card.appendChild(fieldRow('金额', amountIn));
 
-    // 账户一律用下拉（可改）：默认选中习惯推荐/识别出的账户，没有则第一项——
+    // 日期（可改）
+    const dateIn = document.createElement('input');
+    dateIn.type = 'date';
+    dateIn.className = 'm-draft-acc';
+    dateIn.value = it.txn_date || '';
+    card.appendChild(fieldRow('日期', dateIn));
+
+    // 分类（可改下拉）：候选按收支类型过滤；推荐分类不在清单时补原生选项
+    const cats = (() => { try { return JSON.parse((document.getElementById('mCats') || {}).textContent || '[]'); } catch { return []; } })();
+    let catSel = null;
+    if (cats.length) {
+      catSel = document.createElement('select');
+      catSel.className = 'm-draft-acc';
+      const kind = income ? 'income' : 'expense';
+      const options = cats.filter((c) => c.kind === kind).slice();
+      if (it.category_id && !options.some((c) => Number(c.id) === Number(it.category_id))) {
+        options.unshift({ id: it.category_id, path: it.category_path || '分类 #' + it.category_id });
+      }
+      for (const c of options) {
+        const o = document.createElement('option');
+        o.value = c.id;
+        o.textContent = c.path;
+        if (it.category_id && Number(c.id) === Number(it.category_id)) o.selected = true;
+        catSel.appendChild(o);
+      }
+      const catRow = fieldRow('分类' + (it.category_recommended ? '（推荐）' : ''), catSel);
+      card.appendChild(catRow);
+    }
+
+    // 账户（可改下拉）：默认选中习惯推荐/识别出的账户，没有则第一项——
     // 只读地显示「（按习惯推荐）」而不给名字与改法，用户没法判断该不该确认（维护者反馈）
     const accs = (() => { try { return JSON.parse((document.getElementById('mAccounts') || {}).textContent || '[]'); } catch { return []; } })();
     let accountSel = null;
     if (accs.length) {
-      const accRow = document.createElement('div');
-      accRow.className = 'm-draft-acc-row';
-      const label = document.createElement('span');
-      label.textContent = '账户';
-      accRow.appendChild(label);
       accountSel = document.createElement('select');
       accountSel.className = 'm-draft-acc';
       // 推荐的账户不在可选清单（如已归档）时补一个原生选项，推荐值不被静默换掉
@@ -350,7 +387,7 @@
         if (it.account_id && Number(a.id) === Number(it.account_id)) o.selected = true;
         accountSel.appendChild(o);
       }
-      accRow.appendChild(accountSel);
+      const accRow = fieldRow('账户' + (it.account_recommended ? '（推荐）' : ''), accountSel);
       if (it.account_recommended) {
         const hint = document.createElement('span');
         hint.className = 'm-draft-hint';
@@ -365,6 +402,42 @@
       accLine.textContent = '账户：' + (it.account_name_resolved || '未指定');
       card.appendChild(accLine);
     }
+
+    // 商户（可改）：默认标题的来源，现在可以改
+    const merchIn = document.createElement('input');
+    merchIn.type = 'text';
+    merchIn.className = 'm-draft-acc';
+    merchIn.placeholder = '商家';
+    merchIn.value = it.merchant || '';
+    card.appendChild(fieldRow('商家', merchIn));
+
+    // 备注（可改，必展示）：生产数据显示备注常是语义主体（「给红霞买社保」），不可见等于半透明确认
+    const noteIn = document.createElement('input');
+    noteIn.type = 'text';
+    noteIn.className = 'm-draft-acc';
+    noteIn.placeholder = '备注';
+    noteIn.value = it.note || '';
+    card.appendChild(fieldRow('备注', noteIn));
+
+    // 归属人（P11，可改）：datalist 给候选（手动名单+沉淀），可输新名字
+    const family = (window.__HL_FAMILY__ || []).slice();
+    if (it.owner_label && !family.includes(it.owner_label)) family.unshift(it.owner_label);
+    const ownerIn = document.createElement('input');
+    ownerIn.type = 'text';
+    ownerIn.className = 'm-draft-acc';
+    ownerIn.setAttribute('list', 'm-owner-list-' + (it.draft_id || Math.random().toString(36).slice(2)));
+    ownerIn.placeholder = '为谁花（可留空）';
+    ownerIn.value = it.owner_label || '';
+    const ownerRow = fieldRow('归属人' + (it.owner_recommended ? '（推荐）' : ''), ownerIn);
+    const dl = document.createElement('datalist');
+    dl.id = ownerIn.getAttribute('list');
+    for (const name of family) {
+      const o = document.createElement('option');
+      o.value = name;
+      dl.appendChild(o);
+    }
+    card.appendChild(dl);
+    card.appendChild(ownerRow);
 
     const ops = document.createElement('div');
     ops.className = 'm-draft-ops';
@@ -386,7 +459,13 @@
       ok.textContent = '入库中…';
       try {
         const item = { ...it };
+        item.amount_cents = Math.round(Math.max(0, parseFloat(amountIn.value || '0') || 0) * 100);
+        if (dateIn.value) item.txn_date = dateIn.value;
+        if (catSel && catSel.value) item.category_id = Number(catSel.value);
         if (accountSel) item.account_id = Number(accountSel.value);
+        item.merchant = merchIn.value.trim();
+        item.note = noteIn.value.trim();
+        item.owner_label = ownerIn.value.trim() || null;
         const res = await fetch('/api/ai/confirm', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf, Accept: 'application/json' },
@@ -420,6 +499,10 @@
   }
 
   function renderDrafts(data, imageIds) {
+    // 归属人候选（P11）：服务端 family 下发，存全局供草稿卡 datalist 用（不覆盖已存值）
+    if (Array.isArray(data.family)) {
+      window.__HL_FAMILY__ = Array.from(new Set([].concat(window.__HL_FAMILY__ || [], data.family)));
+    }
     // 附件按「数量一致一一对应」的既有约定挂到对应草稿；数量不一致时只有第一张卡携带，
     // 其余不带——服务端约定是全挂第一笔，多卡都带会让后确认的把附件抢走
     data.items.forEach((it, idx) => {

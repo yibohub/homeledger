@@ -420,7 +420,23 @@ router.get('/members', auth.requireLogin, (req, res) => {
     title: '成员与权限', activeNav: 'members',
     members: members.map((m) => ({ ...m, stat: statMap.get(Number(m.user_id)) || { cnt: 0, expense: 0, income: 0 } })),
     invites,
+    familyManual: require('../lib/ai').familyMembers(ledgerId, { manualOnly: true }),
   });
+});
+
+/* P11 家庭成员（消费归属人）名单：手动维护部分，存 settings；沉淀部分由流水统计自动并入 */
+router.post('/members/family', auth.requireLogin, auth.requireLedgerManage, (req, res) => {
+  const ledgerId = Number(res.locals.ledger.id);
+  const names = String(req.body.names || '')
+    .split(/[、,，;；\s]+/)
+    .map((n) => n.trim())
+    .filter(Boolean)
+    .slice(0, 30);
+  const setSetting = require('../db').setSetting;
+  setSetting(`family.members.${ledgerId}`, JSON.stringify(names));
+  auth.audit(req, 'members.family', { ledgerId, detail: names.join('、') });
+  res.flash('success', '家庭成员名单已保存');
+  res.redirect('/members');
 });
 
 router.post('/members/invite', auth.requireLogin, auth.requireLedgerManage, (req, res) => {

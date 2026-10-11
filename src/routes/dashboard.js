@@ -59,6 +59,8 @@ router.get('/', auth.requireLogin, (req, res, next) => {
       cur, budgets: budgetsWithForecast, recent,
       // 草稿缺账户时捕获区要能选账户（规则引擎草稿常无账户，不能让确认卡死）
       mAccounts: fd.accounts(ledgerId).map((a) => ({ id: a.id, name: a.name, icon: a.icon })),
+      // 草稿卡分类下拉候选（P11 批次）
+      mCats: fd.flatCategories(ledgerId).map((c) => ({ id: c.id, path: c.path, kind: c.kind })),
     });
   }
   const todayList = txn.listTransactions(ledgerId, { from: todayStr(), to: todayStr(), pageSize: 100 }).rows;

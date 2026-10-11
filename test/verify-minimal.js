@@ -131,6 +131,12 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
     js.status === 200 && js.text.includes("classList.add('busy')") && js.text.includes('识别中…')
       && js.text.includes("classList.remove('busy')") && js.text.includes('goSpan.textContent = goLabel'), '');
   check('m.js 账户一律下拉可改（推荐预选 + 「可改」提示，维护者反馈修复）', js.status === 200 && js.text.includes('m-draft-acc-row') && js.text.includes('按习惯推荐，可改'), '');
+  check('m.js 草稿卡全字段可改（维护者反馈：只有账户可改不够）', js.status === 200
+    && js.text.includes("amountIn.type = 'number'") && js.text.includes("dateIn.type = 'date'")
+    && js.text.includes('mCats') && js.text.includes("merchIn.placeholder = '商家'")
+    && js.text.includes("noteIn.placeholder = '备注'") && js.text.includes("ownerIn.value = it.owner_label || ''"), '');
+  check('m.js 备注必展示可改 + 确认时携带编辑值', js.status === 200 && js.text.includes('item.note = noteIn.value.trim()')
+    && js.text.includes('item.merchant = merchIn.value.trim()') && js.text.includes('item.owner_label = ownerIn.value.trim() || null'), '');
   const djs = await req('GET', '/static/js/app.js', { ua: DESKTOP_UA });
   check('桌面 AI 页文字快记同分流（问句出回答不建草稿）', djs.status === 200 && djs.text.includes("res.mode === 'answer'"), `HTTP ${djs.status}`);
   check('桌面文字快记也有 busy 反馈 + finally 复原（断网不卡死按钮）',
@@ -158,8 +164,11 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   const home1 = await req('GET', '/', { ua: PHONE_UA });
   const accs = JSON.parse((home1.text.match(/id="mAccounts">([\s\S]*?)<\/script>/) || [null, '[]'])[1]);
   check('首页内嵌账户清单（缺账户草稿的确认依赖）', accs.length >= 1, JSON.stringify(accs).slice(0, 80));
+  const catsEmbedded = JSON.parse((home1.text.match(/id="mCats">([\s\S]*?)<\/script>/) || [null, '[]'])[1]);
+  check('首页内嵌分类清单（草稿卡分类下拉候选）', Array.isArray(catsEmbedded) && catsEmbedded.length >= 2 && catsEmbedded.every((c) => c.id && c.path && c.kind), JSON.stringify(catsEmbedded).slice(0, 60));
   r = await req('POST', '/api/ai/text', { json: { text: '午饭 35 元' }, ua: PHONE_UA });
   check('草稿接口出草稿不入库', r.status === 200 && r.json.ok === true && r.json.items.length === 1 && r.json.created === undefined, `HTTP ${r.status}`);
+  check('草稿接口下发归属人候选名单（family）', Array.isArray(r.json.family), JSON.stringify(r.json.family));
   const draft = r.json.items[0];
   check('草稿带分类与金额（规则引擎）', Number(draft.amount_cents) === 3500 && !!draft.category_id, JSON.stringify({ a: draft.amount_cents, c: draft.category_id }));
   if (!draft.account_id) draft.account_id = accs[0].id; // 与 m.js 草稿卡片同行为：缺账户时下拉默认第一项
