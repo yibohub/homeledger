@@ -14,6 +14,8 @@
  *        PORT=8099 HOST=127.0.0.1 DATA_DIR=<repo>/data-verify node server.js
  *      覆盖 /export/csv 导出、建账本切换后 preview + commit 全链路回导、
  *      重复导入去重、微信账单中性记录（includeNeutral）与坏请求分支
+ *   C. P8 导入兜底分类（HTTP + 本地 mock 模型）：词表/习惯本地富化、AI 批量兜底、
+ *      提交采信校验、无 AI 降级
  *      注意：手工重跑前先删 DATA_DIR（与 verify-transactions 共用 data-verify 目录名，
  *      残留种子会让导出行数翻倍而报红——响亮失败，不是假绿）
  *
@@ -21,6 +23,7 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
+const http = require('node:http');
 
 const IMP_DATA_DIR = path.join(__dirname, '..', 'data-verify-import');
 // 8099 实例的数据目录：run-all 会把服务端 DATA_DIR 传进环境，必须在下面覆盖前捕获
@@ -410,6 +413,91 @@ const formCsrf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[
   const withdraw = neutralRows.find((x) => x.to_acc === '银行卡');
   check('提现行对方账户按「提现到银行卡」文字推断出银行卡', !!withdraw && Number(withdraw.amount_cents) === 50000,
     JSON.stringify(withdraw));
+
+  /* ============================ C. P8 导入兜底分类 ============================ */
+  console.log('\n=== C. P8 导入兜底分类（词表/习惯/AI 批量 + 降级）===\n');
+
+  // 注意：本套件 A 段把 db 模块指向 data-verify-import（测试自有库），
+  // 服务端库一律走 raw 或 HTTP——种子用 POST /transactions（同时覆盖路由侧沉淀挂点）
+  const accC = raw.prepare("SELECT id FROM accounts WHERE ledger_id = ? AND name = '微信钱包'").get(homeId);
+  const fruitC = raw.prepare("SELECT c.id FROM categories c JOIN categories p ON p.id = c.parent_id WHERE c.name = '水果' AND p.name = '餐饮'").get();
+  const breakC = raw.prepare("SELECT c.id FROM categories c JOIN categories p ON p.id = c.parent_id WHERE c.name = '早餐' AND p.name = '餐饮'").get();
+  check('C 前置：服务端库账户与分类就绪', !!accC && !!fruitC && !!breakC);
+  const seedTxn = async (merchant, catId, amount) => {
+    const page = await req('GET', '/transactions/new', { cookie });
+    return req('POST', '/transactions', {
+      cookie, form: {
+        _csrf: csrf, type: 'expense', amount, account_id: String(accC.id), category_id: String(catId.id),
+        txn_date: db.todayStr(), merchant, note: '',
+      },
+    });
+  };
+  // 词表映射：甲词表站 ×3 → 水果（手动记账触发沉淀）
+  for (let i = 0; i < 3; i++) await seedTxn('甲词表站', fruitC, '7.00');
+  // 习惯：乙习惯站 ×2 → 早餐（商户历史推荐，词表未沉淀）
+  for (let i = 0; i < 2; i++) await seedTxn('乙习惯站', breakC, '9.00');
+  check('词表已沉淀（服务端库）', raw.prepare(
+    "SELECT COUNT(*) AS c FROM settings WHERE key = ? AND value LIKE '%甲词表站%'"
+  ).get(`dict.categories.${homeId}`).c >= 1);
+  const p8Csv = [
+    '交易时间,收/支,金额(元),交易对方,商品说明',
+    `${db.todayStr()} 12:00:00,支出,88.00,甲词表站,神秘商品`,
+    `${db.todayStr()} 13:00:00,支出,66.00,乙习惯站,神秘商品`,
+    `${db.todayStr()} 14:00:00,支出,55.00,丙模型站,神秘商品`,
+    `${db.todayStr()} 15:00:00,收入,30.00,张三老熟人,神秘商品`,
+  ].join('\n');
+  const p8b64 = Buffer.from(p8Csv, 'utf8').toString('base64');
+
+  // 无 AI：词表/习惯本地富化照常（零 token），模型兜底静默跳过
+  r = await req('POST', '/api/import/preview', { json: { dataUrl: 'data:text/csv;base64,' + p8b64, fileName: 'p8.csv' } });
+  check('P8 预览成功 4 笔', r.body?.ok === true && r.body.count === 4, JSON.stringify({ ok: r.body?.ok, count: r.body?.count }));
+  const p8row = (m) => (r.body?.sample || []).find((s) => s.merchant === m);
+  check('词表富化带角标（甲词表站→餐饮/水果（词表））', /餐饮\/水果（词表）/.test(p8row('甲词表站')?.guess_category || ''), p8row('甲词表站')?.guess_category);
+  check('习惯富化带角标（乙习惯站→（习惯））', /（习惯）/.test(p8row('乙习惯站')?.guess_category || ''), p8row('乙习惯站')?.guess_category);
+  check('无 AI 时模型兜底静默（丙模型站落其他，不挡导入）', (p8row('丙模型站')?.guess_category || '').includes('其他'), p8row('丙模型站')?.guess_category);
+
+  // mock 模型：8099 服务进程经 127.0.0.1 回连本测试进程起的服务；
+  // AI 配置写服务端库（raw），服务端每次读配置都查库、即时生效
+  const getSet = (k) => (raw.prepare('SELECT value FROM settings WHERE key = ?').get(k) || {}).value || '';
+  const setSet = (k, v) => raw.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)').run(k, v);
+  const savedAi = { enabled: getSet('ai.enabled'), base: getSet('ai.base_url'), model: getSet('ai.model') };
+  const NAP = JSON.stringify({ mappings: [
+    { merchant: '丙模型站', category_name: '餐饮/外卖' },
+    { merchant: '张三老熟人', category_name: '工资' },
+  ] });
+  const mock = http.createServer((mq, mr) => {
+    mq.on('data', () => {});
+    mq.on('end', () => {
+      mr.writeHead(200, { 'Content-Type': 'application/json' });
+      mr.end(JSON.stringify({ choices: [{ message: { content: NAP } }] }));
+    });
+  });
+  await new Promise((res2) => mock.listen(0, '127.0.0.1', res2));
+  setSet('ai.enabled', 'true');
+  setSet('ai.base_url', `http://127.0.0.1:${mock.address().port}/v1`);
+  setSet('ai.model', 'mock-import');
+  try {
+    r = await req('POST', '/api/import/preview', { json: { dataUrl: 'data:text/csv;base64,' + p8b64, fileName: 'p8-ai.csv' } });
+    const rowAI = (m) => (r.body?.sample || []).find((s) => s.merchant === m);
+    check('AI 批量兜底带角标（丙模型站→餐饮/外卖（AI））', /餐饮\/外卖（AI）/.test(rowAI('丙模型站')?.guess_category || ''), rowAI('丙模型站')?.guess_category);
+    check('AI 兜底收入方向（张三老熟人→工资（AI））', /工资（AI）/.test(rowAI('张三老熟人')?.guess_category || ''), rowAI('张三老熟人')?.guess_category);
+    r = await req('POST', '/api/import/commit', { json: { token: r.body?.token } });
+    check('P8 提交 4 笔入库 0 失败', r.body?.ok === true && r.body.imported === 4 && r.body.failed === 0,
+      JSON.stringify({ i: r.body?.imported, f: r.body?.failed }));
+    const catOf = (m) => raw.prepare(
+      `SELECT c.name AS n, c.kind AS k FROM transactions t JOIN categories c ON c.id = t.category_id
+       WHERE t.ledger_id = ? AND t.merchant = ? AND t.source = 'import' AND t.deleted_at IS NULL`
+    ).get(homeId, m);
+    check('提交采信词表富化（水果）', catOf('甲词表站')?.n === '水果', JSON.stringify(catOf('甲词表站')));
+    check('提交采信习惯富化（早餐）', catOf('乙习惯站')?.n === '早餐', JSON.stringify(catOf('乙习惯站')));
+    check('提交采信 AI 兜底（外卖）', catOf('丙模型站')?.n === '外卖', JSON.stringify(catOf('丙模型站')));
+    check('提交采信 AI 兜底（工资，收入方向）', catOf('张三老熟人')?.k === 'income' && catOf('张三老熟人')?.n === '工资', JSON.stringify(catOf('张三老熟人')));
+  } finally {
+    mock.close();
+    setSet('ai.enabled', savedAi.enabled);
+    setSet('ai.base_url', savedAi.base);
+    setSet('ai.model', savedAi.model);
+  }
 
   raw.close();
   console.log(`\n结果：${pass} 通过 / ${fail} 失败\n`);

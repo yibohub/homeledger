@@ -1,11 +1,13 @@
 'use strict';
 /** 报表与图表 */
 const express = require('express');
-const { all, get, todayStr } = require('../db');
+const { all, get, todayStr, getSetting, setSetting, nowStr } = require('../db');
 const auth = require('../lib/auth');
 const txn = require('../lib/txn');
 const fd = require('../lib/formdata');
 const u = require('../lib/util');
+const annual = require('../lib/annual');
+const ai = require('../lib/ai');
 
 const router = express.Router();
 
@@ -101,6 +103,69 @@ router.get('/reports', auth.requireLogin, (req, res) => {
     top: req.query.top || null,
     today: todayStr(),
   });
+});
+
+/* ------------------------------ P9 年度账单 ------------------------------- */
+
+function narrativeKey(ledgerId, year) {
+  return `annual.narrative.${ledgerId}.${year}`;
+}
+
+function readNarrative(ledgerId, year) {
+  try { return JSON.parse(getSetting(narrativeKey(ledgerId, year), 'null')); } catch { return null; }
+}
+
+router.get('/annual', auth.requireLogin, (req, res) => {
+  const ledger = res.locals.ledger;
+  if (!ledger) return res.redirect('/');
+  const ledgerId = Number(ledger.id);
+  const year = /^\d{4}$/.test(String(req.query.year || '')) ? String(req.query.year) : todayStr().slice(0, 4);
+  const stats = annual.yearStats(ledgerId, year);
+  // 年份切换器：账本第一笔账所在年 ~ 当前年（最多列 6 个，再往前不常见）
+  const firstYear = Number((get(
+    'SELECT MIN(txn_date) AS d FROM transactions WHERE ledger_id = ? AND deleted_at IS NULL', ledgerId
+  )?.d || todayStr()).slice(0, 4));
+  const curYear = Number(todayStr().slice(0, 4));
+  const years = [];
+  for (let y = curYear; y >= Math.max(firstYear, curYear - 5); y--) years.push(String(y));
+  res.render('annual', {
+    title: `${year} 年度账单`, activeNav: 'reports',
+    stats, year, years,
+    narrative: readNarrative(ledgerId, year),
+    aiUsable: ai.isAiUsable(),
+    today: todayStr(),
+  });
+});
+
+// 模型写年度叙事：只喂聚合值（出网白名单），数字全部 SQL 预计算，模型不做算术不编数
+router.post('/api/annual/narrative', auth.requireLogin, async (req, res) => {
+  const ledger = res.locals.ledger;
+  if (!ledger) return res.status(400).json({ ok: false, error: '没有账本' });
+  const ledgerId = Number(ledger.id);
+  const year = /^\d{4}$/.test(String(req.body.year || '')) ? String(req.body.year) : todayStr().slice(0, 4);
+  try {
+    if (!ai.isAiUsable()) {
+      return res.status(400).json({ ok: false, error: '尚未配置 AI 模型（设置 → AI 截图记账），纯统计数据仍可正常查看' });
+    }
+    const stats = annual.yearStats(ledgerId, year);
+    if (!stats.hasData) return res.status(400).json({ ok: false, error: `${year} 年还没有账目，先记几笔再来生成总结吧` });
+
+    const out = await ai.callModel([
+      {
+        role: 'system',
+        content: '你是家庭记账本的年度总结撰稿人。根据给出的年度统计写 3~5 句中文总结：亲切自然、有具体数字、有温度，像家人间的年终闲聊。只能引用给出的数字，绝不编造或计算新数字；不输出标题，不输出 JSON，只输出正文。',
+      },
+      { role: 'user', content: `请为以下年度账目写年度总结：\n${JSON.stringify(annual.narrativePayload(stats), null, 1)}` },
+    ]);
+    const text = String(out || '').trim().slice(0, 600);
+    if (!text) return res.status(400).json({ ok: false, error: '模型没有返回内容，请稍后再试' });
+    const rec = { text, generated_at: nowStr() };
+    setSetting(narrativeKey(ledgerId, year), JSON.stringify(rec));
+    auth.audit(req, 'annual.narrative', { ledgerId, detail: `${year} 年度总结生成（${text.length} 字）` });
+    res.json({ ok: true, ...rec });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: `生成失败：${e.message}` });
+  }
 });
 
 module.exports = router;

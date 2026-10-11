@@ -314,10 +314,20 @@ scheduler 与 routes 共用，scheduler.js 已 360 行不再加）。scheduler.r
 
 ---
 
-#### P8 导入兜底分类
+#### P8 导入兜底分类（第七批实施中 2026-10-11，详设已补齐）
 
 微信 CSV 导入时关键词表匹配不上的商户，批量丢给模型兜底分类（现在一律落"其他"），结果仍走导入预览确认页，用户可改。
 **工作量**：S。**风险**：低（有人工确认环节）。
+
+**详设（2026-10-11 补齐，随第七批落地）**
+
+1. **富化位置**：`/api/import/preview`（解析后、缓存前）调用新函数 `ai.enrichImportCategories(ledgerId, records)`——预览页看到什么就导入什么；`importRecords` 提交侧只认 `rec.category_id`（服务端 previewCache 内流转，客户端只见 token，无伪造面），无预富化时走原链，外部调用方无感。
+2. **本地三级优先**（零 token，先吃 P13/P1 红利）：`category_hint` 解析（现状）→ 系统关键词表（现状）→ **个人词表 dict.lookup** → **习惯 habitCategoryId**；只处理非 neutral、非双边、expense/income 的记录。
+3. **模型批量兜底**：本地仍未定的唯一商户（按方向分组，合计上限 40 个）一次请求——出网仅「商户名 + 支出/收入分类完整路径清单 + 方向」，不发金额/日期/流水；要求只输出 JSON `{"mappings":[{"merchant":"…","category_name":"餐饮/外卖"}]}`，经 resolveCategoryId 映射回 id。预览行带来源角标（词表/习惯/AI），可解释。
+4. **提交校验**：importRecords 对 `rec.category_id` 校验分类存在、未归档、kind 相符才采用，否则落回原链——纵深防御。
+5. **降级**：无 Key / AI 未启用 / 模型失败 / 超时 → 静默跳过批量兜底，行为与现状一致（其他）；任何异常不挡导入预览。
+
+**涉及**：lib/ai.js（enrichImportCategories）、routes/admin.js（preview async 化 + 角标）、lib/importers.js（提交侧认 rec.category_id）、public/js/app.js（预览表来源角标）、test/verify-importers.js 扩展（词表/习惯富化 + commit 采信 + 降级 + fetch 桩测 AI 批量）。
 
 #### P14 few-shot 自适配（押后：出网边界需维护者先决策）
 
@@ -328,10 +338,19 @@ scheduler 与 routes 共用，scheduler.js 已 360 行不再加）。scheduler.r
 
 ---
 
-#### P9 年度账单叙事
+#### P9 年度账单叙事（第七批实施中 2026-10-11，详设已补齐）
 
 统计出全部数字（Top 分类、最常去商户、月度曲线、第一笔交易…），模型写叙事文案，做成一个可滑动的"年度报告"页。娱乐属性强，家庭用户传播好感度高。
 **工作量**：M–L。**风险**：低（纯展示）。
+
+**详设（2026-10-11 补齐，随第七批落地）**
+
+1. **纯统计零 token**：`lib/annual.js` `yearStats(ledgerId, year)` 全部 SQL 出数——总收支/结余、12 月收支曲线、支出 Top8 分类（完整路径）、最常去商户 Top8（笔数+金额）、最大单笔支出、第一笔账、记账天数、总笔数、归属人分布（复用 P11 ownerBreakdown）。**模型不做任何算术**，叙事只描述聚合值。
+2. **页面**：`GET /annual?year=YYYY`（默认当前年）——英雄卡（总收支/结余/天数/笔数）+ 月度 CSS 柱状 + Top 分类条形 + 常去商户 + 趣味数字（第一笔/最大单笔）+ 归属人卡；空数据空态；报表页头部加「年度账单」入口。UA 自动选 layout（既有机制），手机桌面同一模板。
+3. **模型叙事**：`POST /api/annual/narrative {year}`（requireLogin + 有账本）——把聚合值 JSON 交给模型（**出网=聚合值，白名单内**），写 3~5 句中文总结；存 settings `annual.narrative.<ledgerId>.<year>`（带 generated_at），页面展示缓存、按钮重新生成。只读成员可生成（不写账目，缓存账本级共享）。
+4. **降级**：无 Key / 未启用 / 模型失败 → 400 + 引导文案，页面叙事区显示「配置 AI 后可生成年度总结」提示；纯统计部分无 Key 全功能可用。
+
+**涉及**：lib/annual.js（新）、routes/reports.js（/annual + /api/annual/narrative）、src/views/annual.ejs（新）+ reports.ejs（入口）、test/verify-annual.js（新套件登记 run-all）。
 
 ---
 

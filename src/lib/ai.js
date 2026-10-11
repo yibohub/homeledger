@@ -717,6 +717,88 @@ function habitCategoryId(ledgerId, merchant, type = 'expense') {
 }
 
 /**
+ * P8 导入兜底分类：导入预览阶段给「关键词表猜不中」的记录补分类。
+ * 本地三级优先（hint/关键词/个人词表/习惯，零 token）→ 仍未定的唯一商户批量丢给模型
+ * 一次请求（出网仅商户名 + 分类路径清单 + 方向，不发金额日期流水）；结果写
+ * rec.category_id / rec.category_source，由 previewCache 服务端持有，提交侧校验后采信。
+ * 任何失败静默返回（无 Key / 模型挂了 → 行为同现状「其他」，不挡导入）。
+ */
+const IMPORT_AI_MERCHANT_CAP = 40;
+
+const IMPORT_FALLBACK_PROMPT = `你是一个记账分类助手。给你一批商户名和一份分类清单，请给每个商户选一个最贴近的分类。
+要求：
+1. 只输出 JSON，不要输出任何解释文字。
+2. category_name 必须从给出的清单里原样选择（完整路径），拿不准就选「其他」类。
+3. 每个商户都必须给出映射，不要遗漏。`;
+
+async function enrichImportCategories(ledgerId, records) {
+  const enriched = { dict: 0, habit: 0, ai: 0 };
+  try {
+    const pending = { expense: new Map(), income: new Map() }; // merchant -> recs
+    for (const rec of records || []) {
+      if (rec.neutral || rec.category_id) continue;
+      if (!['expense', 'income'].includes(rec.type)) continue;
+      const kind = rec.type;
+      const merchant = String(rec.merchant || '').trim().slice(0, 60);
+      if (!merchant) continue;
+      if (rec.category_hint && resolveCategoryId(ledgerId, rec.category_hint, kind)) continue; // 现状 hint 链
+      if (classifyByKeywords(rec.text)) continue; // 现状关键词链
+      const hit = dict.lookup(ledgerId, merchant, rec.text || '', kind);
+      if (hit) {
+        rec.category_id = Number(hit.category_id);
+        rec.category_source = 'dict';
+        enriched.dict += 1;
+        continue;
+      }
+      const habitCat = habitCategoryId(ledgerId, merchant, kind);
+      if (habitCat) {
+        rec.category_id = habitCat;
+        rec.category_source = 'habit';
+        enriched.habit += 1;
+        continue;
+      }
+      if (!pending[kind].has(merchant)) pending[kind].set(merchant, []);
+      pending[kind].get(merchant).push(rec);
+    }
+
+    if (!isAiUsable()) return enriched;
+    const cats = buildContext(ledgerId);
+    const jobs = [];
+    for (const kind of ['expense', 'income']) {
+      const merchants = [...pending[kind].keys()].sort();
+      if (!merchants.length) continue;
+      jobs.push({ kind, merchants: merchants.slice(0, IMPORT_AI_MERCHANT_CAP) });
+    }
+    for (const job of jobs) {
+      const paths = job.kind === 'income' ? cats.incomePaths : cats.expensePaths;
+      const out = await callModel([
+        { role: 'system', content: IMPORT_FALLBACK_PROMPT },
+        {
+          role: 'user',
+          content: `分类清单（${job.kind === 'income' ? '收入' : '支出'}，完整路径）：${paths.join('、')}\n商户名单：\n${job.merchants.join('\n')}`,
+        },
+      ]);
+      const data = extractJson(out) || {};
+      for (const m of (Array.isArray(data.mappings) ? data.mappings : [])) {
+        const merchant = String(m.merchant || '').trim();
+        const recs = pending[job.kind].get(merchant);
+        if (!recs) continue;
+        const cid = resolveCategoryId(ledgerId, m.category_name, job.kind);
+        if (!cid) continue;
+        for (const rec of recs) {
+          rec.category_id = cid;
+          rec.category_source = 'ai';
+          enriched.ai += 1;
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[ai] 导入分类兜底失败（不影响导入）:', e.message);
+  }
+  return enriched;
+}
+
+/**
  * P12 习惯反馈闭环：草稿确认时比对「识别推荐快照」与最终值，被改掉的字段记一次负反馈。
  * 快照 rec_snapshot{category_id, account_id, owner_label} 由前端在应用用户编辑之前写入
  * （m.js 展开草稿时、app.js 提交时按卡片索引回取）；没带快照（旧缓存 JS）自然跳过。
@@ -995,6 +1077,7 @@ module.exports = {
   resolveCategoryId, resolveAccountId, normalizeItem, buildContext,
   habitAccountId, habitCategoryId, buildHabitSummary, buildUserPrompt,
   familyMembers, habitOwnerId, cleanOwnerLabel, recordDraftFeedback,
+  enrichImportCategories,
   extractAmount, cleanMerchant, callModel, listModels, guessVision, extractJson,
   isHeaderSafe, isMaskedSecret, sanitizeSecret,
 };

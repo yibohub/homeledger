@@ -255,6 +255,13 @@ function importRecords({
           if (!toAccountId) rec.type = 'transfer';
         } else {
           const kind = rec.type === 'income' ? 'income' : 'expense';
+          // P8：预览阶段富化的分类直接采信（服务端 previewCache 产生，提交侧仍校验存在/未归档/kind 相符——纵深防御）
+          const pre = Number(rec.category_id);
+          if (pre && get(
+            'SELECT id FROM categories WHERE id = ? AND is_archived = 0 AND kind = ?', pre, kind
+          )) {
+            categoryId = pre;
+          }
           const kw = classifyByKeywords(rec.text);
           if (rec.category_hint) categoryId = resolveCategoryId(ledgerId, rec.category_hint, kind);
           if (!categoryId && kw) categoryId = resolveCategoryId(ledgerId, kw.category, kw.kind === 'income' ? 'income' : kind);

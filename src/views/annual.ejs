@@ -1,0 +1,189 @@
+<%
+  var f = helpers.fmtAmount;
+  var yuan = function (c) { return Number(c) / 100; };
+  var monthLabels = stats.monthly.map(function (m) { return Number(m.month) + '月'; });
+  var maxMerch = 0;
+  stats.topMerchants.forEach(function (m) { if (m.total > maxMerch) maxMerch = m.total; });
+  maxMerch = Math.max(maxMerch, 1);
+  var ownerMax = 0;
+  stats.owners.forEach(function (o) { if (Number(o.expense) > ownerMax) ownerMax = Number(o.expense); });
+  ownerMax = Math.max(ownerMax, 1);
+%>
+
+<div class="card tight mb16">
+  <div class="row wrap" style="gap:6px">
+    <% years.forEach(function (y) { %>
+      <a class="chip <%= y === year ? 'primary' : '' %>" href="/annual?year=<%= y %>"><%= y %> 年</a>
+    <% }); %>
+    <span class="spacer"></span>
+    <a class="chip" href="/reports?preset=year&year=<%= year %>">报表视角 →</a>
+  </div>
+</div>
+
+<% if (!stats.hasData) { %>
+<div class="card">
+  <div class="empty">
+    <span class="big">🗓️</span>
+    <b><%= year %> 年还没有账目</b><br>
+    <span class="small muted">记下这一年的第一笔，年底就能看到属于你们的年度账单</span>
+  </div>
+</div>
+<% } else { %>
+
+<div class="grid grid-4 mb16">
+  <div class="stat">
+    <div class="label">全年支出</div>
+    <div class="value amount expense"><%= f(stats.totals.expense) %></div>
+    <div class="delta"><%= stats.totals.count %> 笔账</div>
+  </div>
+  <div class="stat">
+    <div class="label">全年收入</div>
+    <div class="value amount income"><%= f(stats.totals.income) %></div>
+    <div class="delta">工资 / 理财 / 红包都在内</div>
+  </div>
+  <div class="stat">
+    <div class="label">全年结余</div>
+    <div class="value amount <%= stats.totals.net >= 0 ? 'income' : 'expense' %>"><%= f(stats.totals.net) %></div>
+    <div class="delta">储蓄率 <%= stats.totals.income > 0 ? ((stats.totals.net / stats.totals.income) * 100).toFixed(1) : '—' %>%</div>
+  </div>
+  <div class="stat">
+    <div class="label">记账天数</div>
+    <div class="value"><%= stats.totals.days %> 天</div>
+    <div class="delta">占全年 <%= Math.round((stats.totals.days / 365) * 100) %>% 的日子</div>
+  </div>
+</div>
+
+<div class="card mb16" id="narrative">
+  <div class="card-head">
+    <h2>✨ 年度总结</h2>
+    <% if (narrative) { %><span class="muted small">生成于 <%= helpers.fmtDateTime(narrative.generated_at) %></span><% } %>
+  </div>
+  <div id="narrative-text">
+    <% if (narrative) { %>
+      <p style="line-height:1.8;margin:0"><%= narrative.text %></p>
+    <% } else if (aiUsable) { %>
+      <p class="muted" style="margin:0 0 10px">让 AI 看着这一年的数字，写几句像家人闲聊一样的年终总结。</p>
+    <% } else { %>
+      <p class="muted" style="margin:0">在「设置 → AI 截图记账」配置模型后，可以生成 AI 年度总结；下面的统计数字不受影响。</p>
+    <% } %>
+  </div>
+  <% if (aiUsable) { %>
+    <div class="row mt12" style="gap:8px">
+      <button class="btn btn-sm" type="button" id="narrative-gen"><%= narrative ? '重新生成' : '生成 AI 年度总结' %></button>
+      <span class="muted small" id="narrative-hint"></span>
+    </div>
+  <% } %>
+</div>
+
+<div class="card mb16">
+  <div class="card-head"><h2>每月收支</h2><span class="muted small">十二个月的起落</span></div>
+  <div class="chart-box">
+    <%- charts.barChart({
+      labels: monthLabels,
+      series: [
+        { name: '支出', color: '#f5222d', data: stats.monthly.map(function (m) { return yuan(m.expense); }) },
+        { name: '收入', color: '#52c41a', data: stats.monthly.map(function (m) { return yuan(m.income); }) },
+      ],
+      height: 210
+    }) %>
+  </div>
+</div>
+
+<div class="grid grid-2 mb16">
+  <div class="card">
+    <div class="card-head"><h2>钱都花在哪</h2><span class="muted small">支出 Top <%= stats.topCats.length %> 分类</span></div>
+    <% if (stats.topCats.length) { %>
+      <%- charts.rankBars(stats.topCats.map(function (c) { return { name: c.name, value: yuan(c.total), color: '#4f7cff' }; }), { valueUnit: '' }) %>
+    <% } else { %><p class="muted small">这一年没有支出记录</p><% } %>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>最常去的地方</h2><span class="muted small">按笔数排</span></div>
+    <% if (stats.topMerchants.length) { %>
+      <% stats.topMerchants.forEach(function (m) { %>
+        <div class="row between" style="padding:7px 0;border-bottom:1px dashed var(--border);gap:10px">
+          <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b><%= m.merchant %></b> <span class="tiny muted"><%= m.cnt %> 笔</span></span>
+          <span class="amount expense small"><%= f(m.total) %></span>
+        </div>
+        <div class="mt8"><%- charts.progressBar(m.total, maxMerch, { color: '#fa8c16' }) %></div>
+      <% }) %>
+    <% } else { %>
+      <p class="muted small">这一年没有带商户名的支出</p>
+    <% } %>
+  </div>
+</div>
+
+<div class="grid grid-2 mb16">
+  <div class="card">
+    <div class="card-head"><h2>最大的一笔</h2></div>
+    <% if (stats.biggest) { %>
+      <div class="amount expense" style="font-size:26px"><%= f(stats.biggest.amount) %></div>
+      <div class="small muted mt8">
+        <%= stats.biggest.txn_date %> · <%= stats.biggest.merchant || stats.biggest.note || '未记商户' %>
+      </div>
+    <% } else { %><p class="muted small">没有支出记录</p><% } %>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>这一年的第一笔</h2></div>
+    <% if (stats.first) { %>
+      <div class="amount <%= stats.first.type === 'income' ? 'income' : 'expense' %>" style="font-size:26px"><%= f(stats.first.amount) %></div>
+      <div class="small muted mt8">
+        <%= stats.first.txn_date %> · <%= stats.first.merchant || stats.first.note || '未记商户' %> · <%= stats.first.type === 'income' ? '收入' : '支出' %>
+      </div>
+    <% } else { %><p class="muted small">没有账目</p><% } %>
+  </div>
+</div>
+
+<% if (stats.owners.length) { %>
+<div class="card">
+  <div class="card-head"><h2>为谁花的</h2><span class="muted small">归属人支出分布</span></div>
+  <% stats.owners.forEach(function (o) { %>
+    <div class="row between" style="padding:7px 0;border-bottom:1px dashed var(--border);gap:10px">
+      <span><b><%= o.label %></b> <span class="tiny muted"><%= o.cnt %> 笔</span></span>
+      <span class="amount expense small"><%= f(o.expense) %></span>
+    </div>
+    <div class="mt8"><%- charts.progressBar(Number(o.expense), ownerMax, { color: '#eb2f96' }) %></div>
+  <% }) %>
+</div>
+<% } %>
+
+<% } %>
+
+<script>
+  (function () {
+    var btn = document.getElementById('narrative-gen');
+    if (!btn) return;
+    var csrf = (document.querySelector('meta[name="csrf"]') || {}).content || '';
+    btn.addEventListener('click', async function () {
+      btn.disabled = true;
+      var old = btn.textContent;
+      btn.textContent = '生成中…';
+      var hint = document.getElementById('narrative-hint');
+      if (hint) hint.textContent = '';
+      try {
+        var res = await fetch('/api/annual/narrative', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf, Accept: 'application/json' },
+          body: JSON.stringify({ year: '<%= year %>' }),
+        });
+        var data = await res.json().catch(function () { return {}; });
+        if (res.ok && data.ok && data.text) {
+          document.getElementById('narrative-text').innerHTML = '';
+          var p = document.createElement('p');
+          p.style.lineHeight = '1.8';
+          p.style.margin = '0';
+          p.textContent = data.text;
+          document.getElementById('narrative-text').appendChild(p);
+          btn.textContent = '重新生成';
+          if (hint) hint.textContent = '生成于 ' + data.generated_at;
+        } else {
+          btn.textContent = old;
+          if (hint) hint.textContent = data.error || '生成失败，请稍后再试';
+        }
+      } catch (e) {
+        btn.textContent = old;
+        if (hint) hint.textContent = '网络异常，请稍后再试';
+      }
+      btn.disabled = false;
+    });
+  })();
+</script>
