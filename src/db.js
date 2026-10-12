@@ -263,6 +263,25 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 CREATE INDEX IF NOT EXISTS idx_att_txn ON attachments(txn_id);
 
+-- P15 识别原文落库：一次 AI 识别（scan/text/chat/api）留一行。
+-- 用户输入的识别原文此前不落库（ai_json 只存模型输出），识别失败/后悔药撤销后无从回溯；
+-- 用途：识别质量统计、习惯挖掘语料、审计溯源、失败样本重放。见 docs/ai-roadmap.md §P15。
+CREATE TABLE IF NOT EXISTS ai_inputs (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  ledger_id     INTEGER NOT NULL,
+  user_id       INTEGER,
+  source        TEXT NOT NULL,            -- scan | text | chat | api
+  engine        TEXT,                     -- llm | rule（识别失败未到引擎时为 NULL）
+  model         TEXT,
+  input_text    TEXT,                     -- 用户输入的识别原文（≤4000 字符；截图路径为文字附言）
+  image_count   INTEGER NOT NULL DEFAULT 0,
+  item_count    INTEGER NOT NULL DEFAULT 0, -- 识别产出的草稿笔数（0 = 本次识别无产出，恰是失败样本）
+  attachment_id INTEGER,                  -- 首张附件（截图路径可回看原图）
+  first_txn_id  INTEGER,                  -- 首笔入账交易（自动入库路径，撤销后按此回溯原文）
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_inputs_ledger ON ai_inputs(ledger_id, created_at);
+
 CREATE TABLE IF NOT EXISTS budgets (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   ledger_id   INTEGER NOT NULL,
