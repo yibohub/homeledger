@@ -61,7 +61,7 @@ const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
   // 提示词规则（草稿卡反馈 2026-10-12）：商家/备注提取规则必须存在——「备注为空、起讫地/事由丢失」的根因修复
   const aiSrc = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'src', 'lib', 'ai.js'), 'utf8');
   check('SYSTEM_PROMPT 含商家/备注提取规则（起讫地/事由保留不丢）',
-    aiSrc.includes('起讫地') && aiSrc.includes('湘潭北到长沙友谊路'), '');
+    aiSrc.includes('起讫地') && aiSrc.includes('东站到人民广场'), '');
 
   /* --- 登录 --- */
   r = await req('GET', '/login');
@@ -220,11 +220,11 @@ const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
     `engine=${r.json?.engine} calls=${mockCalls - beforeSensitive}`);
 
   // 备注兜底（草稿卡反馈 2026-10-12）：模型没给 note 时，文字路径以清洗后原文补（起讫地/事由不丢）
-  r = await req('POST', '/api/ai/text', { json: { text: '湘潭北到长沙友谊路地铁花费6.3元' }, cookie });
+  r = await req('POST', '/api/ai/text', { json: { text: '东站到人民广场地铁花费6.3元' }, cookie });
   check('语境文本走模型（非敏感不误拦）', r.json?.engine === 'llm' && r.json.items?.length === 1,
     `engine=${r.json?.engine} items=${r.json?.items?.length}`);
   check('模型空备注时以原文语境兜底（起讫地保留）',
-    (r.json.items || [])[0]?.note === '湘潭北到长沙友谊路地铁', JSON.stringify((r.json.items || [])[0]?.note));
+    (r.json.items || [])[0]?.note === '东站到人民广场地铁', JSON.stringify((r.json.items || [])[0]?.note));
   r = await req('POST', '/api/ai/text', { json: { text: '微信支付35元买奶茶' }, cookie });
   check('兜底先剥付款方式词（微信支付不残留、动词不撕词）',
     (r.json.items || [])[0]?.note === '买奶茶', JSON.stringify((r.json.items || [])[0]?.note));
