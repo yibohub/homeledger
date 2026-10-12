@@ -179,6 +179,23 @@ dd2 = prr('2月30号花了多少');
 check('「2月30号」不存在的日子不答单日（退整月候选，宁缺毋错）', dd2 && dd2.kind === 'month', JSON.stringify(dd2));
 check('「13月40号」非法不解析', prr('13月40号花了多少') === undefined);
 
+/* 审查修复回归（PR #38：P1-1 显式年季度丢年 / P2-1 日期区间被吃成首日单日） */
+qr = prr('2024年第1季度');
+check('「2024年第1季度」显式年份不丢（审查 P1-1）', qr && qr.from === '2024-01-01' && qr.to === '2024-03-31' && qr.label === '2024年第1季度', JSON.stringify(qr));
+qr = prr('2025年第3季度');
+check('「2025年第3季度」→ 2025 Q3', qr && qr.from === '2025-07-01' && qr.to === '2025-09-30', JSON.stringify(qr));
+const rsIso = prr('2026-10-01到2026-10-07花了多少');
+check('「2026-10-01到2026-10-07」→ 区间（审查 P2-1，非首日单日）', rsIso && rsIso.kind === 'between' && rsIso.from === '2026-10-01' && rsIso.to === '2026-10-07', JSON.stringify(rsIso));
+const spanA = shiftDate(today, -8);
+const spanB = shiftDate(today, -2);
+const spanText = spanA.slice(5, 7) === spanB.slice(5, 7)
+  ? `${Number(spanA.slice(5, 7))}月${Number(spanA.slice(8, 10))}号到${Number(spanB.slice(8, 10))}号`
+  : `${Number(spanA.slice(5, 7))}月${Number(spanA.slice(8, 10))}号到${Number(spanB.slice(5, 7))}月${Number(spanB.slice(8, 10))}号`;
+const rsCn = prr(`${spanText}花了多少`);
+check(`「${spanText}」→ 区间（同月短式/双侧月日自适应，任意日期跑均成立）`, rsCn && rsCn.kind === 'between' && rsCn.from === spanA && rsCn.to === spanB, JSON.stringify(rsCn));
+const rxYear = aiAsk.parseRangeByRules('12月31号到1月1号花了多少', '2026-01-03');
+check('「12月31号到1月1号」（1月3日问）→ 跨年区间（尾段进位+未来回退复合）', rxYear && rxYear.from === '2025-12-31' && rxYear.to === '2026-01-01', JSON.stringify(rxYear));
+
 /* between 规则层可自带人话 label（周/季度），上一期等长回退 */
 const rlbl = aiAsk.resolveRange({ kind: 'between', from: `${Y}-01-06`, to: `${Y}-01-12`, label: '上周' }, `${Y}-01-13`);
 check('between 规则 label 生效且上一期等长', rlbl.label === '上周' && rlbl.prev.end === shiftDate(`${Y}-01-06`, -1) && rlbl.prev.start === shiftDate(`${Y}-01-06`, -7), JSON.stringify(rlbl));

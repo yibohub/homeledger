@@ -318,6 +318,35 @@ function parseRangeByRules(text, today) {
     if (d && !m[1] && d > today) d = cnDay(y - 1, mm, dd);
     return d ? { kind: 'between', from: d, to: d } : null;
   });
+  // 日期区间（审查 P2-1）：「10月1号到7号」「10月1号到10月7号」「2026-10-01到2026-10-07」——
+  // 无此前缀时会被单日候选吃成首日单日，比答整月更窄、笔数金额系统性少报。
+  // 尾段无年且落在起点之前 → 进位下一年（「12月31号到1月1号」跨年）；无显式年份且
+  // 整段在未来 → 回退最近的过去同区间（与裸单日同一口径）
+  const spanOf = (ya, ma, da, yb, mb, db) => {
+    const y2 = yb == null ? ya : yb;
+    let a = cnDay(ya, ma, da);
+    let b = cnDay(y2, mb, db);
+    if (!a || !b) return null;
+    if (yb == null && a > today) { // 先做未来回退（基准年整体 -1），再做跨年进位
+      const a2 = cnDay(ya - 1, ma, da);
+      const b2 = cnDay(y2 - 1, mb, db);
+      if (a2 && b2) { ya -= 1; a = a2; b = cnDay(ya, mb, db) || b; }
+    }
+    if (yb == null && a > b) { const b2 = cnDay(ya + 1, mb, db); if (b2) b = b2; }
+    if (a > b) [a, b] = [b, a];
+    return { kind: 'between', from: a, to: b };
+  };
+  push(/(今年|去年)?(\d{1,2})月(\d{1,2})[日号]?\s*(?:到|至|[~～]{1,2})\s*(\d{1,2})[日号]?/, (m) => { // 同月短式：10月1号到7号
+    const y = m[1] === '去年' ? year - 1 : year;
+    return spanOf(y, Number(m[2]), Number(m[3]), null, Number(m[2]), Number(m[4]));
+  });
+  push(/(今年|去年)?(\d{1,2})月(\d{1,2})[日号]?\s*(?:到|至|[~～]{1,2})\s*(\d{1,2})月(\d{1,2})[日号]?/, (m) => { // 双侧月日：10月1号到11月7号
+    const y = m[1] === '去年' ? year - 1 : year;
+    return spanOf(y, Number(m[2]), Number(m[3]), null, Number(m[4]), Number(m[5]));
+  });
+  push(/(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})[日号]?\s*(?:到|至|[~～]{1,2})\s*(?:(20\d{2})[-/.年])?(\d{1,2})[-/.月](\d{1,2})[日号]?/, (m) => { // 带年（尾年可省）：2026-10-01到2026-10-07
+    return spanOf(Number(m[1]), Number(m[2]), Number(m[3]), m[4] ? Number(m[4]) : null, Number(m[5]), Number(m[6]));
+  });
   push(/(去年|今年)?(\d{1,2})月/, (m) => {
     const mm = Number(m[2]);
     return mm >= 1 && mm <= 12 ? { kind: 'month', month: `${m[1] === '去年' ? year - 1 : year}-${pad(mm)}` } : null;
@@ -327,10 +356,13 @@ function parseRangeByRules(text, today) {
     const yq = quarterOfMonth(thisMonth) === 1 ? { y: year - 1, q: 4 } : { y: year, q: quarterOfMonth(thisMonth) - 1 };
     return quarterRange(yq.y, yq.q);
   });
-  // 「今年第三季度」「去年第4季度」显式季度——此前只有这/上季度，「今年」候选会抢答成全年
-  push(/(今年|去年)?第?\s*([一二三四1-4])\s*个?季度/, (m) => {
+  // 「今年第三季度」「去年第4季度」「2024年第1季度」显式季度——此前只有这/上季度，
+  // 「今年」候选会抢答成全年；显式四位年不捕获会丢年答成今年同名季度（审查 P1-1）
+  push(/(?:(\d{4})年|今年|去年)?第?\s*([一二三四1-4])\s*个?季度/, (m) => {
     const qn = { 一: 1, 二: 2, 三: 3, 四: 4, 1: 1, 2: 2, 3: 3, 4: 4 }[m[2]];
-    return qn ? quarterRange(m[1] === '去年' ? year - 1 : year, qn) : null;
+    if (!qn) return null;
+    const qy = m[1] ? Number(m[1]) : (m[0].startsWith('去年') ? year - 1 : year);
+    return quarterRange(qy, qn);
   });
   push(/去年/, () => ({ kind: 'year', year: year - 1 }));
   push(/今年|年度|全年/, () => ({ kind: 'year', year }));
