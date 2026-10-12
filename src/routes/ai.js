@@ -207,6 +207,13 @@ router.post('/api/ai/text', auth.requireLogin, async (req, res) => {
     const result = await ai.analyzeBill({ images: [], text, ledgerId });
     const categories = fd.flatCategories(ledgerId);
     const accounts = fd.accounts(ledgerId);
+    // P15 识别原文落库：纯文本记账分支（查询分支走 ai-ask，不在本表口径内）；
+    // record 为 best-effort，置于响应之前与其余三入口对齐
+    aiInputs.record({
+      ledgerId, userId: req.session.userId, source: 'text',
+      engine: result.engine, model: result.model || null,
+      inputText: text, imageCount: 0, itemCount: result.items.length,
+    });
     res.json({
       ok: true,
       engine: result.engine,
@@ -218,12 +225,6 @@ router.post('/api/ai/text', auth.requireLogin, async (req, res) => {
         account_name_resolved: accounts.find((a) => Number(a.id) === Number(it.account_id))?.name || '',
       }))),
       family: ai.familyMembers(ledgerId),
-    });
-    // P15 识别原文落库：纯文本记账分支（查询分支走 ai-ask，不在本表口径内）
-    aiInputs.record({
-      ledgerId, userId: req.session.userId, source: 'text',
-      engine: result.engine, model: result.model || null,
-      inputText: text, imageCount: 0, itemCount: result.items.length,
     });
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });

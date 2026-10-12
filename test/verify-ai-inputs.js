@@ -22,9 +22,14 @@ function check(name, ok, detail = '') {
   else { fail++; console.log(`  FAIL  ${name}  — ${detail}`); }
 }
 
-// 8099 实例的数据目录：run-all 会把服务端 DATA_DIR 传进环境；手工跑时默认 data-verify
-const SERVER_DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, '..', 'data-verify');
-// 每次读都开新连接：只读连接在 WAL 下会停在打开瞬间的快照，看不到服务端新写入（实测踩坑）；
+// 8099 实例的数据目录：必须由 DATA_DIR 显式传入（run-all 自动带）；不带就退出——
+// DatabaseSync 会对不存在的库静默建空库，对着错误数据库断言出误导性结果（独立审查 P3-2）
+if (!process.env.DATA_DIR) {
+  console.log('  SKIP  手工运行必须带 DATA_DIR=<8099 实例的数据目录>（run-all 自动传入），避免直连错误数据库');
+  process.exit(0);
+}
+const SERVER_DATA_DIR = path.resolve(process.env.DATA_DIR);
+// 每次读都开新连接并关闭：只读连接在 WAL 下会停在打开瞬间的快照，看不到服务端新写入（实测踩坑）；
 // 可写连接（测试只读不写）能读到最新已提交状态。轮询兜底跨过写入可见性的毫秒级窗口。
 function db() {
   const { DatabaseSync } = require('node:sqlite');
@@ -35,8 +40,15 @@ function db() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function inputCount() {
   for (let i = 0; ; i++) {
-    try { return Number(db().prepare('SELECT COUNT(*) AS c FROM ai_inputs').get().c); }
-    catch (e) { if (i >= 9) throw e; await sleep(100); }
+    const conn = db();
+    try {
+      return Number(conn.prepare('SELECT COUNT(*) AS c FROM ai_inputs').get().c);
+    } catch (e) {
+      if (i >= 9) throw e;
+      await sleep(100);
+    } finally {
+      conn.close();
+    }
   }
 }
 // 轮询到「行数超过 afterCount」（即本次 POST 的新行已可见）再取最新行——
@@ -128,9 +140,11 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   r = await req('POST', '/api/ai/chat', { json: { text: '咖啡 22 元' } });
   check('chat 自动入库成功', r.status === 200 && r.json?.created >= 1, JSON.stringify({ created: r.json?.created }));
   row = await lastInput(cntBeforeChat);
+  const chatConn = db();
   const chatTxn = row && row.first_txn_id
-    ? db().prepare('SELECT id, amount_base_cents FROM transactions WHERE id = ?').get(row.first_txn_id)
+    ? chatConn.prepare('SELECT id, amount_base_cents FROM transactions WHERE id = ?').get(row.first_txn_id)
     : null;
+  chatConn.close();
   check('chat 落库：source/first_txn_id 指向实账（撤销后可回溯原文）',
     row && row.source === 'chat' && chatTxn && Number(chatTxn.amount_base_cents) === 2200,
     JSON.stringify({ row: row && { source: row.source, first: row.first_txn_id }, txn: chatTxn }));
