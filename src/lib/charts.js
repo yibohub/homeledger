@@ -200,13 +200,17 @@ function donutLegend(items = [], total = null, valueUnit = '') {
 
 /* ----------------------------- 水平条形排行（TOP N） ---------------------------- */
 
+// 条目可带 href：有则分类名渲染为链接（如报表页点一级分类下钻），无则纯文本。
+// href 调用契约：仅接受站内路径（/ 开头），esc 只做 HTML 转义拦不住 javascript: 等协议
 function rankBars(items = [], { valueUnit = '', max: maxOverride = null } = {}) {
   const max = maxOverride !== null ? maxOverride : Math.max(...items.map((i) => Math.abs(Number(i.value) || 0)), 1);
   return items
     .map(
       (it, idx) => `<div class="rank-row">
       <span class="rank-idx">${idx + 1}</span>
-      <span class="rank-name" title="${esc(it.name)}">${esc(it.name)}</span>
+      ${typeof it.href === 'string' && it.href.startsWith('/')
+        ? `<a class="rank-name" href="${esc(it.href)}" title="${esc(it.name)}">${esc(it.name)}</a>`
+        : `<span class="rank-name" title="${esc(it.name)}">${esc(it.name)}</span>`}
       <span class="rank-track"><i style="width:${Math.max((Math.abs(it.value) / max) * 100, 1.5).toFixed(1)}%;background:${col(it.color, C.primary)}"></i></span>
       <span class="rank-val">${nf(it.value)}${esc(valueUnit)}</span>
     </div>`
