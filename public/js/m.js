@@ -486,7 +486,10 @@
     ops.appendChild(no);
     card.appendChild(ops);
 
-    no.addEventListener('click', () => { card.remove(); advanceTop(); }); // 放弃同样推进到下一张
+    no.addEventListener('click', () => {
+      card.remove(); advanceTop();
+      if (!draftsEl.querySelector('.m-draft:not(.done)')) say('ok', '草稿已清空'); // 与确认路径对称（审查 P3-1）
+    }); // 放弃同样推进到下一张
     ok.addEventListener('click', async () => {
       ok.disabled = true;
       ok.textContent = '入库中…';
@@ -524,11 +527,17 @@
           done.textContent = '✓ 已入账';
           ops.appendChild(done);
           // 逐卡确认不整页刷新（维护者定案 2026-10-12，修「确认一张冲走其余未确认卡」）：
-          // 就地停留半秒给反馈 → 移除该卡 → 下一张自动居中；队列清空给完成提示
+          // 就地停留半秒给反馈 → 移除该卡 → 下一张自动居中；队列清空给完成提示，
+          // 并条件性整页刷新让「最近 5 笔/本月收支」跟上——此刻已无未确认卡，无冲卡之虞
           setTimeout(() => {
             card.remove();
             const left = advanceTop();
-            say('ok', left > 0 ? '已入账，待确认 ' + left + ' 笔' : '已全部入账');
+            if (left > 0) {
+              say('ok', '已入账，待确认 ' + left + ' 笔');
+            } else {
+              say('ok', '已全部入账，正在刷新…');
+              setTimeout(() => location.reload(), 600);
+            }
           }, 500);
         } else {
           ok.disabled = false;
@@ -559,18 +568,20 @@
       card._imageIds = data.items.length === (imageIds || []).length ? [imageIds[idx]].filter(Boolean) : (idx === 0 ? (imageIds || []).slice(0, 1) : []);
       frag.appendChild(card);
     });
+    // 首卡引用必须在 insertBefore 之前取——DOM 规范会把 fragment 子节点全部移入文档并清空
+    // fragment，插完再读 frag.firstChild 恒为 null（审查 P1-1 实证，居中特性曾静默失效）
+    const topCard = frag.firstChild;
     draftsEl.insertBefore(frag, draftsEl.firstChild);
     // 草稿卡生成在屏幕外（维护者反馈 2026-10-12）：渲染后自动居中首卡（第一条记录），
     // 一眼看到卡与「确认入库」、无需滚动
-    const topCard = frag.firstChild;
     if (topCard) requestAnimationFrame(() => topCard.scrollIntoView({ behavior: 'smooth', block: 'center' }));
   }
 
   // 确认/放弃移除一张卡后，自动把下一张未确认的顶到屏幕中央（维护者定案：逐卡确认自动推进）；
   // 返回剩余未确认张数（0 = 队列已清空）
   function advanceTop() {
-    const next = draftsEl.querySelector('.m-draft:not(.done)');
-    if (next) requestAnimationFrame(() => next.scrollIntoView({ behavior: 'smooth', block: 'center' }));
-    return draftsEl.querySelectorAll('.m-draft:not(.done)').length;
+    const rest = draftsEl.querySelectorAll('.m-draft:not(.done)');
+    if (rest[0]) requestAnimationFrame(() => rest[0].scrollIntoView({ behavior: 'smooth', block: 'center' }));
+    return rest.length;
   }
 })();
