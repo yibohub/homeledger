@@ -23,6 +23,7 @@ const SUITES = [
   'verify-budgets.js',
   'verify-forecast.js',
   'verify-annual.js',
+  'verify-reports.js',
   'verify-transactions.js',
   'verify-importers.js',
   'verify-ai-ask.js',

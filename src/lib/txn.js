@@ -453,7 +453,7 @@ function categoryBreakdown(ledgerId, start, end, kind = 'expense') {
 /** 按二级分类聚合（用于下钻） */
 function subcategoryBreakdown(ledgerId, start, end, kind = 'expense', topName = null) {
   const types = kind === 'income' ? INCOME_TYPES : EXPENSE_TYPES;
-  let sql = `SELECT c.name AS name, c.icon AS icon, c.color AS color, COALESCE(pc.name,'未分类') AS parent,
+  let sql = `SELECT c.name AS name, c.icon AS icon, c.color AS color, COALESCE(pc.name,'未分类') AS parent, c.parent_id AS parent_id,
               SUM(t.amount_base_cents) AS total, COUNT(*) AS cnt
        FROM transactions t
        LEFT JOIN categories c ON c.id = t.category_id

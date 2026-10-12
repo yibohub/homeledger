@@ -141,7 +141,16 @@
       <div class="empty"><span class="big">🏆</span>没有数据</div>
     <% } else { %>
       <div class="scroll-x" style="max-height:340px;overflow-y:auto">
-        <%- charts.rankBars(subcats.slice(0, 30).map(function(c){ return { name: c.parent ? c.parent + '/' + c.name : c.name, value: c.total / 100, color: c.color }; }), { valueUnit: '' }) %>
+        <%- charts.rankBars(subcats.slice(0, 30).map(function(c){
+              var name = c.parent_id ? c.parent + '/' + c.name : (c.name || c.parent || '未分类');
+              var canDrill = !top && !c.parent_id && c.name;
+              return {
+                name: name,
+                value: c.total / 100,
+                color: c.color,
+                href: canDrill ? '/reports?preset=' + encodeURIComponent(range.preset) + '&month=' + encodeURIComponent(range.month || '') + '&kind=' + kind + '&top=' + encodeURIComponent(c.name) : null
+              };
+            }), { valueUnit: '' }) %>
       </div>
       <div class="tiny muted mt8">点分类名可下钻查看该分类下的二级明细</div>
       <div class="row wrap mt8" style="gap:6px">

@@ -541,6 +541,9 @@ a.chip:hover { border-color: var(--primary); color: var(--primary); background: 
 .legend-val, .rank-val { flex: 0 0 84px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 550; font-size: 12.5px; }
 .rank-idx { flex: 0 0 16px; color: var(--faint); font-size: 11px; text-align: center; }
 .rank-name { flex: 0 0 100px; }
+/* 可下钻的排行名：默认同正文色，悬停提示可点 */
+a.rank-name { color: inherit; }
+a.rank-name:hover { color: var(--primary); opacity: 1; }
 
 /* 表格 */
 .table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
