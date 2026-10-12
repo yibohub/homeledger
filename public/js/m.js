@@ -486,7 +486,7 @@
     ops.appendChild(no);
     card.appendChild(ops);
 
-    no.addEventListener('click', () => card.remove());
+    no.addEventListener('click', () => { card.remove(); advanceTop(); }); // 放弃同样推进到下一张
     ok.addEventListener('click', async () => {
       ok.disabled = true;
       ok.textContent = '入库中…';
@@ -521,9 +521,15 @@
           ops.innerHTML = '';
           const done = document.createElement('span');
           done.className = 'm-draft-done';
-          done.textContent = '✓ 已入账，即将刷新';
+          done.textContent = '✓ 已入账';
           ops.appendChild(done);
-          setTimeout(() => location.reload(), 700);
+          // 逐卡确认不整页刷新（维护者定案 2026-10-12，修「确认一张冲走其余未确认卡」）：
+          // 就地停留半秒给反馈 → 移除该卡 → 下一张自动居中；队列清空给完成提示
+          setTimeout(() => {
+            card.remove();
+            const left = advanceTop();
+            say('ok', left > 0 ? '已入账，待确认 ' + left + ' 笔' : '已全部入账');
+          }, 500);
         } else {
           ok.disabled = false;
           ok.textContent = '重试';
@@ -545,14 +551,26 @@
     }
     // 附件按「数量一致一一对应」的既有约定挂到对应草稿；数量不一致时只有第一张卡携带，
     // 其余不带——服务端约定是全挂第一笔，多卡都带会让后确认的把附件抢走
-    let topCard = null;
+    // 正序组装后整组插到栈顶（维护者定案：首卡=第一条记录，与原文阅读顺序一致；
+    // 旧 insertBefore 循环会把最后一条顶到最上、与原文反序）
+    const frag = document.createDocumentFragment();
     data.items.forEach((it, idx) => {
       const card = draftCard(it);
       card._imageIds = data.items.length === (imageIds || []).length ? [imageIds[idx]].filter(Boolean) : (idx === 0 ? (imageIds || []).slice(0, 1) : []);
-      draftsEl.insertBefore(card, draftsEl.firstChild);
-      topCard = card;
+      frag.appendChild(card);
     });
-    // 草稿卡生成在屏幕外（维护者反馈 2026-10-12）：渲染后自动居中，一眼看到卡与「确认入库」、无需滚动
+    draftsEl.insertBefore(frag, draftsEl.firstChild);
+    // 草稿卡生成在屏幕外（维护者反馈 2026-10-12）：渲染后自动居中首卡（第一条记录），
+    // 一眼看到卡与「确认入库」、无需滚动
+    const topCard = frag.firstChild;
     if (topCard) requestAnimationFrame(() => topCard.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+  }
+
+  // 确认/放弃移除一张卡后，自动把下一张未确认的顶到屏幕中央（维护者定案：逐卡确认自动推进）；
+  // 返回剩余未确认张数（0 = 队列已清空）
+  function advanceTop() {
+    const next = draftsEl.querySelector('.m-draft:not(.done)');
+    if (next) requestAnimationFrame(() => next.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+    return draftsEl.querySelectorAll('.m-draft:not(.done)').length;
   }
 })();
