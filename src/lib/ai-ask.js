@@ -166,8 +166,9 @@ function resolveRange(range, today = todayStr()) {
   if (r.kind === 'between' && /^\d{4}-\d{2}-\d{2}$/.test(String(r.from)) && /^\d{4}-\d{2}-\d{2}$/.test(String(r.to))) {
     const from = r.from <= r.to ? r.from : r.to;
     const to = r.from <= r.to ? r.to : r.from;
-    // 单日区间说人话（10月8日），带相对日期词再补注（10月8日（前天））；跨天区间维持 from ~ to
-    const base = from === to ? cnDayLabel(from, today) : `${from} ~ ${to}`;
+    // 单日区间说人话（10月8日），带相对日期词再补注（10月8日（前天））；跨天区间维持 from ~ to；
+    // 规则层候选可自带人话 label（本周/上周/季度），模型路径进不来——normalizeModelQuery 只保留 from/to
+    const base = r.label || (from === to ? cnDayLabel(from, today) : `${from} ~ ${to}`);
     const label = r.day_label ? `${base}（${r.day_label}）` : base;
     const prev = /^\d{4}-\d{2}-\d{2}$/.test(String(r.prevFrom)) && /^\d{4}-\d{2}-\d{2}$/.test(String(r.prevTo))
       ? { start: r.prevFrom, end: r.prevTo, label: '上一期' }
@@ -183,6 +184,9 @@ function resolveRange(range, today = todayStr()) {
 const CN_NUM = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
 function parseCnNumber(s) {
   if (/^\d+$/.test(s)) return Number(s);
+  // 复合数词：十(10)/十五(15)/二十(20)/二十五(25)…≤99——「最近十五天」「近十二个月」此前解析不出落缺省
+  const m = /^([一二两三四五六七八九]?)十([一二三四五六七八九]?)$/.exec(s);
+  if (m) return (m[1] ? CN_NUM[m[1]] : 1) * 10 + (m[2] ? CN_NUM[m[2]] : 0);
   return CN_NUM[s] || null;
 }
 
@@ -218,8 +222,11 @@ function matchMember(text, ctx) {
 
 /**
  * 从文本解析时间范围（规则版），未识别返回 undefined 交由缺省（本月）。
+ * 覆盖：月/年/季度/周（周一始）/N 月/N 天/N 周/半年·一年（近、最近、过去前缀；中文数词含 ≤99 复合）/
+ * 相对单日（今天~大前天/N天前）/显式日期（带年或不带年，精确到日答单日）。
  * 候选表 + 位置仲裁：句中位置最早者胜，同位重叠取更长（更具体）的匹配——
- * 「这个月到今天」仍是本月、「今天比昨天」主语取今天（compare 句天然取「比」前的时间词）。
+ * 「这个月到今天」仍是本月、「今天比昨天」主语取今天（compare 句天然取「比」前的时间词）、
+ * 「今年第三季度」整词比「今年」长故季度胜。
  * 相对日期单日问法（维护者实测：问「前天」模型曾曲解成最近 2 天，问的那天反而不在窗口内）
  * 走同一张表，日期由代码推算；模型只在提示词里拿预推结果抄写，不自己算日期。
  */
@@ -232,18 +239,44 @@ function parseRangeByRules(text, today) {
     return {
       kind: 'between', from: monthStart(startMonth), to: monthEnd(shiftMonth(startMonth, 2)),
       prevFrom: monthStart(shiftMonth(startMonth, -3)), prevTo: monthEnd(shiftMonth(startMonth, -1)),
+      label: `${y}年第${q}季度`,
     };
+  };
+  // 周一为一周之始（国内习惯）；「本周」滚动到今天（问花费是至今口径），「上周」为完整周一~周日，
+  // 上一期由 resolveRange 等长回退（与近 N 月同一公平对比原则）。
+  // shiftDay 是「往前推 n 天」语义：offset 为负（过去周）时减去负数即多推
+  const weekMonday = (weekOffset) => {
+    const dow = (new Date(`${today}T00:00:00`).getDay() + 6) % 7; // 周一=0 … 周日=6
+    return shiftDay(today, dow - weekOffset * 7);
+  };
+  // 'YYYY-MM-DD' 合法性（2月30日这类直接拒绝，宁缺毋错交下一候选或缺省）
+  const cnDay = (y, mm, dd) => {
+    if (!(mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31)) return null;
+    const d = `${y}-${pad(mm)}-${pad(dd)}`;
+    const dt = new Date(`${d}T00:00:00`);
+    return dt.getMonth() + 1 === mm && dt.getDate() === dd ? d : null;
   };
   const cands = [];
   const push = (re, make) => {
     const m = re.exec(s);
     if (m) cands.push({ index: m.index, len: m[0].length, m, make });
   };
-  push(/(?:近|最近)\s*(\d{1,2}|[一两二三四五六七八九十]+)\s*个?月/, (m) => {
+  push(/(?:近|最近|过去)\s*(\d{1,2}|[一两二三四五六七八九十]+)\s*个?月/, (m) => {
     const n = parseCnNumber(m[1]);
     return n ? { kind: 'months', months: n } : null;
   });
-  push(/(?:近|最近)\s*(\d{1,3})\s*天/, (m) => ({ kind: 'days', days: Number(m[1]) }));
+  // 「最近三天」等中文数词此前漏解析 → 规则层无显式 range，模型把「三」配错单位输出
+  // months:3 时无规则值可优先（维护者实测：问三天答三个月）——数词口径必须与 months 对齐
+  push(/(?:近|最近|过去)\s*(\d{1,3}|[一两二三四五六七八九十]+)\s*天/, (m) => {
+    const n = parseCnNumber(m[1]);
+    return n ? { kind: 'days', days: n } : null;
+  });
+  push(/(?:近|最近|过去)\s*半\s*年/, () => ({ kind: 'months', months: 6 }));
+  push(/(?:近|最近|过去)\s*[一1]\s*年/, () => ({ kind: 'months', months: 12 }));
+  push(/(?:近|最近|过去)\s*(\d{1,2}|[一两二三四五六七八九十]+)\s*(?:周|礼拜)/, (m) => {
+    const n = parseCnNumber(m[1]);
+    return n && n <= 52 ? { kind: 'days', days: n * 7 } : null; // 「最近一周」=7 天，折算后仍走 days 钳制
+  });
   push(/大前天/, () => singleDayRange(today, 3, '大前天')); // 先于前天判：子串包含，同位时 len 仲裁也会选它
   push(/前天/, () => singleDayRange(today, 2, '前天'));
   push(/昨天|昨日/, () => singleDayRange(today, 1, '昨天'));
@@ -256,9 +289,63 @@ function parseRangeByRules(text, today) {
   push(/上上个月/, () => ({ kind: 'month', month: shiftMonth(thisMonth, -2) }));
   push(/这(个)?月|本(个)?月/, () => ({ kind: 'month', month: thisMonth }));
   push(/上(个)?月|上一月/, () => ({ kind: 'month', month: shiftMonth(thisMonth, -1) }));
+  // 周/礼拜（此前无匹配 →「本周花了多少」静默答本月，窗口错档）；「上一周/这一周」带数词的口语同义。
+  // prev 整体平移 7 天（上个日历周同位置）——不交 prevOf 等长回退：周五问「本周比上周」
+  // 会拿上周二~周六比，错位两个工作日；本周滚动至今同理（周一问=上周一同一天）
+  push(/上上(?:个|一)?(?:周|礼拜)/, () => {
+    const mon = weekMonday(-2);
+    return { kind: 'between', from: mon, to: shiftDay(mon, -6), prevFrom: shiftDay(mon, 7), prevTo: shiftDay(mon, 1), label: '上上周' };
+  });
+  push(/这(?:个|一)?(?:周|礼拜)|本周/, () => ({
+    kind: 'between', from: weekMonday(0), to: today,
+    prevFrom: shiftDay(weekMonday(0), 7), prevTo: shiftDay(today, 7), label: '本周',
+  }));
+  push(/上(?:个|一)?(?:周|礼拜)|上周/, () => {
+    const mon = weekMonday(-1);
+    return { kind: 'between', from: mon, to: shiftDay(mon, -6), prevFrom: shiftDay(mon, 7), prevTo: shiftDay(mon, 1), label: '上周' };
+  });
   push(/((?:19|20)\d{2})\s*[-/.年]?\s*(\d{1,2})\s*月/, (m) => {
     const mm = Number(m[2]);
     return mm >= 1 && mm <= 12 ? { kind: 'month', month: `${m[1]}-${pad(mm)}` } : null;
+  });
+  // 「10月8号」「去年12月3日」→ 单日（此前只按「10月」答整月，窗口错档一档）；
+  // 裸月日默认今年，落在未来按最近的过去那个同日理解（问未来花销无意义，2月30日由 cnDay 拒绝）
+  push(/(今年|去年)?(\d{1,2})月(\d{1,2})[日号]/, (m) => {
+    const mm = Number(m[2]);
+    const dd = Number(m[3]);
+    let y = m[1] === '去年' ? year - 1 : year;
+    let d = cnDay(y, mm, dd);
+    if (d && !m[1] && d > today) d = cnDay(y - 1, mm, dd);
+    return d ? { kind: 'between', from: d, to: d } : null;
+  });
+  // 日期区间（审查 P2-1）：「10月1号到7号」「10月1号到10月7号」「2026-10-01到2026-10-07」——
+  // 无此前缀时会被单日候选吃成首日单日，比答整月更窄、笔数金额系统性少报。
+  // 尾段无年且落在起点之前 → 进位下一年（「12月31号到1月1号」跨年）；无显式年份且
+  // 整段在未来 → 回退最近的过去同区间（与裸单日同一口径）
+  const spanOf = (ya, ma, da, yb, mb, db) => {
+    const y2 = yb == null ? ya : yb;
+    let a = cnDay(ya, ma, da);
+    let b = cnDay(y2, mb, db);
+    if (!a || !b) return null;
+    if (yb == null && a > today) { // 先做未来回退（基准年整体 -1），再做跨年进位
+      const a2 = cnDay(ya - 1, ma, da);
+      const b2 = cnDay(y2 - 1, mb, db);
+      if (a2 && b2) { ya -= 1; a = a2; b = cnDay(ya, mb, db) || b; }
+    }
+    if (yb == null && a > b) { const b2 = cnDay(ya + 1, mb, db); if (b2) b = b2; }
+    if (a > b) [a, b] = [b, a];
+    return { kind: 'between', from: a, to: b };
+  };
+  push(/(今年|去年)?(\d{1,2})月(\d{1,2})[日号]?\s*(?:到|至|[~～]{1,2})\s*(\d{1,2})[日号]?/, (m) => { // 同月短式：10月1号到7号
+    const y = m[1] === '去年' ? year - 1 : year;
+    return spanOf(y, Number(m[2]), Number(m[3]), null, Number(m[2]), Number(m[4]));
+  });
+  push(/(今年|去年)?(\d{1,2})月(\d{1,2})[日号]?\s*(?:到|至|[~～]{1,2})\s*(\d{1,2})月(\d{1,2})[日号]?/, (m) => { // 双侧月日：10月1号到11月7号
+    const y = m[1] === '去年' ? year - 1 : year;
+    return spanOf(y, Number(m[2]), Number(m[3]), null, Number(m[4]), Number(m[5]));
+  });
+  push(/(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})[日号]?\s*(?:到|至|[~～]{1,2})\s*(?:(20\d{2})[-/.年])?(\d{1,2})[-/.月](\d{1,2})[日号]?/, (m) => { // 带年（尾年可省）：2026-10-01到2026-10-07
+    return spanOf(Number(m[1]), Number(m[2]), Number(m[3]), m[4] ? Number(m[4]) : null, Number(m[5]), Number(m[6]));
   });
   push(/(去年|今年)?(\d{1,2})月/, (m) => {
     const mm = Number(m[2]);
@@ -269,9 +356,21 @@ function parseRangeByRules(text, today) {
     const yq = quarterOfMonth(thisMonth) === 1 ? { y: year - 1, q: 4 } : { y: year, q: quarterOfMonth(thisMonth) - 1 };
     return quarterRange(yq.y, yq.q);
   });
+  // 「今年第三季度」「去年第4季度」「2024年第1季度」显式季度——此前只有这/上季度，
+  // 「今年」候选会抢答成全年；显式四位年不捕获会丢年答成今年同名季度（审查 P1-1）
+  push(/(?:(\d{4})年|今年|去年)?第?\s*([一二三四1-4])\s*个?季度/, (m) => {
+    const qn = { 一: 1, 二: 2, 三: 3, 四: 4, 1: 1, 2: 2, 3: 3, 4: 4 }[m[2]];
+    if (!qn) return null;
+    const qy = m[1] ? Number(m[1]) : (m[0].startsWith('去年') ? year - 1 : year);
+    return quarterRange(qy, qn);
+  });
   push(/去年/, () => ({ kind: 'year', year: year - 1 }));
   push(/今年|年度|全年/, () => ({ kind: 'year', year }));
-  push(/(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})[日号]?/, (m) => ({ kind: 'month', month: `${m[1]}-${pad(Number(m[2]))}` }));
+  // 「2026-10-08」「2026年10月8日」→ 单日（此前答整月）；「2026年10月」（无日）仍由前面的年月候选按整月
+  push(/(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})[日号]?/, (m) => {
+    const d = cnDay(Number(m[1]), Number(m[2]), Number(m[3]));
+    return d ? { kind: 'between', from: d, to: d } : null;
+  });
   cands.sort((a, b) => a.index - b.index || b.len - a.len);
   for (const c of cands) {
     const r = c.make(c.m);
@@ -306,7 +405,7 @@ function matchQueryByRules(text, ctx, today = todayStr()) {
   }
   // 3) 对比（本期 vs 上一期）——range 不预填缺省：无时间词时交 resolveRange 兜底本月，
   //    也只有显式 range 才在模型合并时优先
-  if (/多花|少花|多收|多了|少了|增|减|变化|对比|比较|环比|同比|比.{0,6}(月|季度|年)/.test(s)) {
+  if (/多花|少花|多收|多了|少了|增|减|变化|对比|比较|环比|同比|比.{0,6}(月|季度|年|周)/.test(s)) {
     return { query: { type: 'compare', metric, range, compare_to: 'prev_period', category: matchCategory(s, ctx, metric) } };
   }
   // 4) 排行（Top N / 谁花最多 / 钱花哪了）
@@ -361,6 +460,7 @@ intent 为 query 时给出 query 结构：
   type：category_summary(分类或总计汇总) | compare(两段时间对比) | trend(逐月趋势) | top(排行) | budget(预算执行) | merchant(按商户或关键词查流水)
   metric：expense(支出) | income(收入)，缺省 expense
   range：{"kind":"month","month":"YYYY-MM"} 或 {"kind":"year","year":2026} 或 {"kind":"days","days":30} 或 {"kind":"months","months":3} 或 {"kind":"between","from":"YYYY-MM-DD","to":"YYYY-MM-DD"}；用户没说时间就用本月。
+  单位勿混：天=days（「最近三天」是 {"kind":"days","days":3}），月=months（「最近三个月」是 {"kind":"months","months":3}），勿把「三天」写成 months。
   今天/昨天/前天/大前天/N天前这类相对日期一律用 between 单日区间（from=to），日期必须照抄用户提示里「相对日期对照」给出的对应日期，禁止自己推算日期
   compare_to：compare 类型固定为 "prev_period"
   category：分类名，必须原样取自给定的分类路径列表，拿不准就留空
@@ -375,8 +475,8 @@ function buildAskUserPrompt(text, ctx, today) {
   return [
     `今天是 ${today}。`,
     // 相对日期预推好给模型抄写：模型自己做「今天减 2」这类日期运算不可靠（数字靠统计、日期靠代码）。
-    // 只预推固定四档——「N天前」的 N 由规则层兜底；十五天前这类长中文数词规则层也接不住，
-    // 落回本月缺省（答不到但不会答错），不给模型自行推算日期的口子
+    // 只预推固定四档——「N天前」由规则层兜底（中文数词 ≤99 复合已支持，日期由代码推算），
+    // 不给模型自行推算日期的口子
     `相对日期对照：今天=${today}、昨天=${shiftDay(today, 1)}、前天=${shiftDay(today, 2)}、大前天=${shiftDay(today, 3)}`,
     `支出分类路径：${ctx.expensePaths.join('、')}`,
     `收入分类路径：${ctx.incomePaths.join('、')}`,

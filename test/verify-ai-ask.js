@@ -115,6 +115,91 @@ rr2 = aiAsk.parseRangeByRules('前天比大前天多花多少', today);
 check('「前天比大前天」主语取前天', rr2 && rr2.day_label === '前天', JSON.stringify(rr2));
 check('「1234天前」位数超限不吞位解析（宁缺毋错交缺省）', aiAsk.parseRangeByRules('1234天前花了多少', today) === undefined);
 
+console.log('\n=== A2b. 时间词解析加固（中文数词/周/季度/单日日期，2026-10-12 维护者实测批）===\n');
+
+const prr = (t) => aiAsk.parseRangeByRules(t, today);
+/* 维护者实测：问「最近三天」曾答近三个月——days 正则只认阿拉伯数字，「三天」漏解析放行模型错配单位 */
+for (const [t, n] of [['最近三天花了多少', 3], ['最近两天', 2], ['最近十天', 10], ['最近十五天', 15], ['最近二十天', 20], ['最近3天', 3], ['过去七天', 7]]) {
+  const rd = prr(t);
+  check(`「${t}」→ days:${n}（中文数词/过去前缀）`, rd && rd.kind === 'days' && rd.days === n, JSON.stringify(rd));
+}
+for (const [t, n] of [['近十二个月', 12], ['近二十个月', 20], ['最近半年', 6], ['最近一年', 12], ['近1年', 12]]) {
+  const rm = prr(t);
+  check(`「${t}」→ months:${n}（复合数词/半年一年）`, rm && rm.kind === 'months' && rm.months === n, JSON.stringify(rm));
+}
+for (const [t, n] of [['最近一周', 7], ['最近两周', 14], ['最近3周', 21]]) {
+  const rw2 = prr(t);
+  check(`「${t}」→ days:${n}（周折天）`, rw2 && rw2.kind === 'days' && rw2.days === n, JSON.stringify(rw2));
+}
+const r15 = prr('十五天前花了多少');
+check('「十五天前」→ 单日（复合数词，日期仍由代码推算）', r15 && r15.kind === 'between' && r15.from === shiftDate(today, -15) && r15.day_label === '15天前', JSON.stringify(r15));
+
+/* 周（周一为一周之始；任意真实「今天」跑都成立，含跨年） */
+const dowMon = (new Date(`${today}T00:00:00`).getDay() + 6) % 7;
+const monday = shiftDate(today, -dowMon);
+let wk = prr('本周花了多少');
+check('「本周」→ 周一起至今滚动', wk && wk.kind === 'between' && wk.from === monday && wk.to === today && wk.label === '本周', JSON.stringify(wk));
+wk = prr('这礼拜花了多少');
+check('「这礼拜」同本周', wk && wk.from === monday && wk.to === today, JSON.stringify(wk));
+wk = prr('上个礼拜花了多少');
+check('「上个礼拜」→ 完整上周（周一~周日）', wk && wk.from === shiftDate(monday, -7) && wk.to === shiftDate(monday, -1) && wk.label === '上周', JSON.stringify(wk));
+wk = prr('上一周');
+check('「上一周」同上周', wk && wk.from === shiftDate(monday, -7), JSON.stringify(wk));
+wk = prr('上上周');
+check('「上上周」→ 上上周一~周日', wk && wk.from === shiftDate(monday, -14) && wk.to === shiftDate(monday, -8) && wk.label === '上上周', JSON.stringify(wk));
+wk = prr('本周比上周多花多少');
+check('「本周比上周」主语取本周', wk && wk.from === monday && wk.label === '本周', JSON.stringify(wk));
+check('「本周比上周」走 compare（compare 词表认周）', (() => { const q = ruleOf('本周比上周多花多少'); return q && q.query.type === 'compare'; })());
+const wkResolved = aiAsk.resolveRange(wk, today);
+check('本周的上一期 = 上周同位置等长（公平对比）', wkResolved.prev.start === shiftDate(monday, -7) && wkResolved.prev.end === shiftDate(today, -7), JSON.stringify(wkResolved.prev));
+
+/* 显式季度（此前只有这/上季度，「今年」候选抢答成全年） */
+const Y = Number(thisMonth.slice(0, 4));
+let qr = prr('今年第1季度花了多少');
+check('「今年第1季度」→ Q1 区间+上一季+人话 label', qr && qr.from === `${Y}-01-01` && qr.to === `${Y}-03-31`
+  && qr.prevFrom === `${Y - 1}-10-01` && qr.prevTo === `${Y - 1}-12-31` && qr.label === `${Y}年第1季度`, JSON.stringify(qr));
+qr = prr('去年第4季度');
+check('「去年第4季度」→ 去年 Q4', qr && qr.from === `${Y - 1}-10-01` && qr.to === `${Y - 1}-12-31`, JSON.stringify(qr));
+qr = prr('第3季度');
+check('裸「第3季度」→ 今年 Q3', qr && qr.from === `${Y}-07-01` && qr.to === `${Y}-09-30`, JSON.stringify(qr));
+qr = prr('这季度');
+const qStartMonth = `${Y}-${String(3 * Math.floor((Number(thisMonth.slice(5, 7)) - 1) / 3) + 1).padStart(2, '0')}`;
+check('「这季度」既有行为不回归（当前季度首日）', qr && qr.from === `${qStartMonth}-01`, JSON.stringify(qr));
+
+/* 显式日期单日（此前「10月8号」「2026年10月8日」都答整月，窗口错档一档） */
+const yd = shiftDate(today, -1);
+const ydText = `${Number(yd.slice(5, 7))}月${Number(yd.slice(8, 10))}号`;
+let dd2 = prr(`${ydText}花了多少`);
+check(`「${ydText}」→ 单日（裸月日默认今年且必不在未来）`, dd2 && dd2.kind === 'between' && dd2.from === yd && dd2.to === yd, JSON.stringify(dd2));
+dd2 = prr('去年12月3号');
+check('「去年12月3号」→ 去年单日', dd2 && dd2.from === `${Y - 1}-12-03` && dd2.to === dd2.from, JSON.stringify(dd2));
+dd2 = prr(`${Y}年6月1日`);
+check(`「${Y}年6月1日」→ 单日（带年也不答整月）`, dd2 && dd2.kind === 'between' && dd2.from === `${Y}-06-01` && dd2.to === dd2.from, JSON.stringify(dd2));
+dd2 = prr('2月30号花了多少');
+check('「2月30号」不存在的日子不答单日（退整月候选，宁缺毋错）', dd2 && dd2.kind === 'month', JSON.stringify(dd2));
+check('「13月40号」非法不解析', prr('13月40号花了多少') === undefined);
+
+/* 审查修复回归（PR #38：P1-1 显式年季度丢年 / P2-1 日期区间被吃成首日单日） */
+qr = prr('2024年第1季度');
+check('「2024年第1季度」显式年份不丢（审查 P1-1）', qr && qr.from === '2024-01-01' && qr.to === '2024-03-31' && qr.label === '2024年第1季度', JSON.stringify(qr));
+qr = prr('2025年第3季度');
+check('「2025年第3季度」→ 2025 Q3', qr && qr.from === '2025-07-01' && qr.to === '2025-09-30', JSON.stringify(qr));
+const rsIso = prr('2026-10-01到2026-10-07花了多少');
+check('「2026-10-01到2026-10-07」→ 区间（审查 P2-1，非首日单日）', rsIso && rsIso.kind === 'between' && rsIso.from === '2026-10-01' && rsIso.to === '2026-10-07', JSON.stringify(rsIso));
+const spanA = shiftDate(today, -8);
+const spanB = shiftDate(today, -2);
+const spanText = spanA.slice(5, 7) === spanB.slice(5, 7)
+  ? `${Number(spanA.slice(5, 7))}月${Number(spanA.slice(8, 10))}号到${Number(spanB.slice(8, 10))}号`
+  : `${Number(spanA.slice(5, 7))}月${Number(spanA.slice(8, 10))}号到${Number(spanB.slice(5, 7))}月${Number(spanB.slice(8, 10))}号`;
+const rsCn = prr(`${spanText}花了多少`);
+check(`「${spanText}」→ 区间（同月短式/双侧月日自适应，任意日期跑均成立）`, rsCn && rsCn.kind === 'between' && rsCn.from === spanA && rsCn.to === spanB, JSON.stringify(rsCn));
+const rxYear = aiAsk.parseRangeByRules('12月31号到1月1号花了多少', '2026-01-03');
+check('「12月31号到1月1号」（1月3日问）→ 跨年区间（尾段进位+未来回退复合）', rxYear && rxYear.from === '2025-12-31' && rxYear.to === '2026-01-01', JSON.stringify(rxYear));
+
+/* between 规则层可自带人话 label（周/季度），上一期等长回退 */
+const rlbl = aiAsk.resolveRange({ kind: 'between', from: `${Y}-01-06`, to: `${Y}-01-12`, label: '上周' }, `${Y}-01-13`);
+check('between 规则 label 生效且上一期等长', rlbl.label === '上周' && rlbl.prev.end === shiftDate(`${Y}-01-06`, -1) && rlbl.prev.start === shiftDate(`${Y}-01-06`, -7), JSON.stringify(rlbl));
+
 console.log('\n=== A3. 时间范围与「上一期」（compare 的数字正确性靠它）===\n');
 
 let rg = aiAsk.resolveRange({ kind: 'month', month: thisMonth }, today);
@@ -163,6 +248,11 @@ check('类型保留 + days 钳到 366 + top_n 钳到 10', nq && nq.type === 'top
 check('模型分类名回查为真实路径', nq.category?.name === '餐饮/午餐', JSON.stringify(nq.category));
 nq = aiAsk.normalizeModelQuery({ type: 'merchant', range: { kind: 'month' }, member: '不存在的人' }, CTX, ledgerId, today);
 check('不在成员列表的 member 被丢弃', nq && !nq.member);
+/* between 的 label 只有规则层候选可带：模型路径注入必须被剥离，防止模型自称「本周」盖写窗口口径 */
+nq = aiAsk.normalizeModelQuery(
+  { type: 'category_summary', metric: 'expense', range: { kind: 'between', from: `${Y}-01-06`, to: `${Y}-01-12`, label: '模型自称本周' } },
+  CTX, ledgerId, `${Y}-01-13`);
+check('模型注入 between label 被剥离（只有规则层可带）', nq && nq.range.label === undefined, JSON.stringify(nq && nq.range));
 
 console.log('\n=== A4b. 规则显式参数优先合并（模型只补缺）===\n');
 
@@ -395,6 +485,13 @@ const noComma = (s) => String(s).replace(/,/g, '');
   r = await req('POST', '/api/ai/chat', { json: { text: '前天花了多少钱' } });
   check('问「前天」答前天单日（人话 label，非最近2天/本月）', r.json.mode === 'answer' && r.json.data
     && r.json.data.label.includes('（前天）') && noComma(r.json.text).includes('33.00') && !r.json.text.includes('最近'), r.json.text);
+
+  /* --- 查询分支：时间词加固回归（维护者实测「最近三天」曾答近三个月）--- */
+  r = await req('POST', '/api/ai/chat', { json: { text: '最近三天花了多少钱' } });
+  check('问「最近三天」答最近 3 天（中文数词规则解析，非近三个月/本月缺省）', r.json.mode === 'answer'
+    && r.json.data && r.json.data.label === '最近 3 天' && r.json.engine === 'rule', r.json.text);
+  r = await req('POST', '/api/ai/chat', { json: { text: '本周花了多少' } });
+  check('问「本周」答本周窗口（非本月缺省）', r.json.mode === 'answer' && r.json.data && r.json.data.label === '本周', r.json.text);
 
   /* --- 查询分支：预算 --- */
   r = await req('GET', '/budgets');
