@@ -138,6 +138,18 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   check('m.js 大额勾选仅判定为大额时渲染（小额不出现；收集处空值守卫）',
     js.status === 200 && js.text.includes('let lumpyIn = null') && js.text.includes('if (it.no_rhythm_suggested) {')
       && js.text.includes('lumpyIn && lumpyIn.checked'), '');
+  // 逐卡确认批（维护者定案 2026-10-12）：首卡=第一条记录 + 确认不刷新自动推进
+  check('m.js 首卡=第一条记录（fragment 正序整组插栈顶，修旧循环反序）',
+    js.status === 200 && js.text.includes('createDocumentFragment') && js.text.includes('insertBefore(frag'), '');
+  check('m.js 首卡引用先于 insertBefore 取（fragment 插入即清空，事后读恒 null——审查 P1 回归锁）',
+    js.status === 200
+      && js.text.indexOf('const topCard = frag.firstChild') > -1
+      && js.text.indexOf('const topCard = frag.firstChild') < js.text.indexOf('draftsEl.insertBefore(frag'), '');
+  check('m.js 逐卡确认刷新仅限队列清空后（有未确认卡绝不整页刷新，修「确认一张冲走其余卡」）+ 自动推进',
+    js.status === 200 && !js.text.includes('已入账，即将刷新')
+      && (js.text.match(/location\.reload/g) || []).length === 1
+      && js.text.indexOf('已全部入账，正在刷新…') < js.text.indexOf('location.reload()')
+      && js.text.includes('function advanceTop'), '');
   const djsLumpy = await req('GET', '/static/js/app.js', { ua: DESKTOP_UA });
   check('app.js 大额勾选行同口径按需渲染（仅 no_rhythm_suggested 时出整行）',
     djsLumpy.status === 200 && /\(it\.no_rhythm_suggested\s*\?\s*'<div class="row tiny"/.test(djsLumpy.text), '');
