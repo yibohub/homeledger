@@ -272,6 +272,7 @@ function parseRangeByRules(text, today) {
     return n ? { kind: 'days', days: n } : null;
   });
   push(/(?:近|最近|过去)\s*半\s*年/, () => ({ kind: 'months', months: 6 }));
+  push(/(?:近|最近|过去)\s*半\s*个?月/, () => ({ kind: 'days', days: 15 }));
   push(/(?:近|最近|过去)\s*[一1]\s*年/, () => ({ kind: 'months', months: 12 }));
   push(/(?:近|最近|过去)\s*(\d{1,2}|[一两二三四五六七八九十]+)\s*(?:周|礼拜)/, (m) => {
     const n = parseCnNumber(m[1]);
@@ -817,10 +818,11 @@ const CLARIFY_TEXT =
 const CLARIFY_SCOPE_TEXT =
   '这里只做记账和查账。记一笔试试「午饭 35 元」；查账试试「这个月花了多少」「最近三天打车花了多少」。';
 
-/** 裸「最近/近期」无数字量词：不猜窗口，反问明确（维护者定案 2026-10-12）。
- *  负向断言放过「最近三天/最近半个月/近十二个月」这类已可精确解析的形态 */
-const BARE_RECENT_RE =
-  /(?:最近|近期)(?!\s*(?:[一两二三四五六七八九十百\d半]+\s*个?(?:月|天|周|礼拜|年)|[一两二三四五六七八九十百\d]+\s*季度))/;
+/** 裸「最近/近期」反问闸（维护者定案 2026-10-12）：只认字面，宽窄交给 ruleRangeExplicit——
+ *  规则层解析得出的显式区间（最近三天/三个月/半个月…）本来就能赢闸，解析不出的形态
+ *  （最近三年/一百天/1000天）一律反问，不猜窗口。审查 P2-1：负向断言曾宽于规则层
+ *  覆盖面，「最近半个月」漏放成静默答本月——恰是本闸要消灭的错窗口类 */
+const BARE_RECENT_RE = /(?:最近|近期)/;
 const CLARIFY_BARE_RECENT =
   '「最近」想看多长的时间范围？试试「最近三天」「最近三个月」，或直接说「本周」「本月」。';
 
@@ -876,15 +878,18 @@ async function handleAssistantText({ text, ledgerId, today = todayStr() }) {
  * 预筛残余句（无查询信号词、无句尾金额，如「三天前买了啥」「你好」）：
  * 有 Key 时补一次模型意图解析——query 回查账管线（「N天前」等区间仍由规则层先算好、
  * 合并时优先于模型），other（闲聊/无关）明确纠正项目方向，record/低置信/解析失败
- * 原样交回记账管线（行为与旧版一致）。无 Key 完全不进此分支，零成本预筛性质保留；
- * 敏感本地分流同款词表命中时不出网，交本地记账。
+ * 原样交回记账管线（行为与旧版一致）。无 Key 完全不进此分支，零成本预筛性质保留。
+ * 敏感闸：同款收入类词表命中一律不出网交本地记账（宁严勿漏，不受 sensitive_local_only
+ * 开关控——开关只控记账路径；主查询分支带信号词的句子目前无此闸，既有口径登记 BOARD）。
+ * 带货币语境金额（¥/元/块，如「还房贷 5000 元 本金加利息」）→ 记账意图概率极高，
+ * 不花意图调用直进记账；裸数字（「3天前」「10月8号」）不算金额语境，照进意图分支。
  */
+const CURRENCY_CONTEXT_RE = /(¥|￥)|\d(?:\.\d+)?\s*(?:元|块钱|块|圆)/;
+
 async function resolveResidualIntent(q, ledgerId, today) {
   if (!ai.isAiUsable()) return null;
   if (ai.isSensitiveLocalText(q)) return null;
-  // 句中带明确金额（不以金额结尾的记账句，如「还房贷 5000 元 本金加利息」）→
-  // 记账意图概率极高，不花意图解析调用，原样交记账管线（与旧版行为一致）
-  if (ai.extractAmount(q)) return null;
+  if (CURRENCY_CONTEXT_RE.test(q)) return null;
   const cfg = ai.getAiConfig();
   const ctx = buildQueryContext(ledgerId);
   try {
@@ -898,9 +903,7 @@ async function resolveResidualIntent(q, ledgerId, today) {
       if (nq) {
         // 日期靠代码：模型只给意图类型，区间仍由规则层从原文算（算不出交模型值/缺省）
         const ruleRange = parseRangeByRules(q, today);
-        const merged = mergeRuleParams({ range: ruleRange }, nq);
-        if (/扣了没|扣没扣|扣了吗|到账没/.test(q)) merged.confirm = true;
-        return finishAnswer(q, { query: merged }, { ledgerId, today, usedModel: true, ctx, cfg, ruleRangeExplicit: !!ruleRange });
+        return finishAnswer(q, { query: mergeRuleParams({ range: ruleRange }, nq) }, { ledgerId, today, usedModel: true, ctx, cfg, ruleRangeExplicit: !!ruleRange });
       }
     }
   } catch {
