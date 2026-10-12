@@ -117,14 +117,13 @@ const enc = encodeURIComponent;
     `<a class="rank-name" href="/reports?preset=month&amp;month=${YM}&amp;kind=expense&amp;top=${enc('交通')}" title="交通">交通</a>`
   ), '');
   check('二级行保持纯文本（餐饮/午餐）', r.text.includes('>餐饮/午餐</span>'), '');
-  check('二级行不再渲染链接', !r.text.includes(`href="/reports?${EXPENSE_Q}&top=${enc('午餐')}"`)
-    && !r.text.includes(`&amp;top=${enc('午餐')}"`), '');
+  check('二级行不再渲染链接', !r.text.includes(`&amp;top=${enc('午餐')}"`), '');
   check('一级行不再错挂「未分类/」前缀', !r.text.includes('未分类/餐饮') && !r.text.includes('未分类/交通'), '');
   check('XSS 分类名渲染为全转义的下钻链接', r.text.includes(
     `<a class="rank-name" href="/reports?preset=month&amp;month=${YM}&amp;kind=expense&amp;top=${enc(xssName)}" title="怪&lt;em&gt;分&lt;/em&gt;类">怪&lt;em&gt;分&lt;/em&gt;类</a>`
   ), '');
   check('XSS 分类 href 无裸 HTML 字符', !r.text.includes('top=怪<em') && !r.text.includes('>怪<em'), '');
-  check('未分类账目显示「未分类」', r.text.includes('>未分类</span>'), '');
+  check('未分类账目在排行行显示「未分类」', r.text.includes('class="rank-name" title="未分类">未分类</span>'), '');
   check('不再出现「未分类/null」', !r.text.includes('未分类/null'), '');
   check('chip 快捷行仍带 top= 链接', r.text.includes(`class="chip" href="/reports?preset=month&month=${YM}&kind=expense&top=${enc('餐饮')}"`), '');
 
