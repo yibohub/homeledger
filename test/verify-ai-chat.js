@@ -239,6 +239,10 @@ const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
   check('多笔备注按金额对应来源行（时间词/金额剥净，语境不串行）',
     (r.json.items || [])[0]?.note === '京东买书' && (r.json.items || [])[1]?.note === '淘宝买零食',
     JSON.stringify((r.json.items || []).map((i) => i.note)));
+  // 单笔含分隔符（补审 P2-1 回归锁）：单笔=整段语境，不因逗号分行丢备注
+  r = await req('POST', '/api/ai/text', { json: { text: '午饭，35元' }, cookie });
+  check('单笔含逗号仍整段兜底（午饭，35元 → 午饭）',
+    (r.json.items || [])[0]?.note === '午饭', JSON.stringify((r.json.items || [])[0]?.note));
   r = await req('POST', '/api/ai/text', { json: { text: '微信支付35元买奶茶' }, cookie });
   check('兜底先剥付款方式词（微信支付不残留、动词不撕词）',
     (r.json.items || [])[0]?.note === '买奶茶', JSON.stringify((r.json.items || [])[0]?.note));

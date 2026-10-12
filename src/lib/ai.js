@@ -917,7 +917,7 @@ function normalizeItem(raw, ledgerId, { sourceText = '', noteLines = null } = {}
   // 清洗：先剥付款方式词（「支付宝」会被动词「支付」撕碎成「宝」——审查 P2-1）与相对时间词，
   // 再去金额表达与动词，保留起讫地/事由；residual 与 merchant 全同时零信息量，不兜（P3-2）。
   let noteOut = raw.note ? String(raw.note).slice(0, 200) : null;
-  if (!noteOut && noteLines && noteLines.length) {
+  if (!noteOut && noteLines && noteLines.length && amountCents > 0) {
     const yuan = Math.abs(amountCents || 0) / 100;
     const amtRe = new RegExp('(^|[^0-9.])' + String(yuan).replace('.', '\\.') + '(?=$|[^0-9.]|元|块)');
     const hits = noteLines.filter((l) => amtRe.test(l));
@@ -1009,13 +1009,19 @@ async function analyzeBill({ images = [], text = '', ledgerId }) {
       const parsed = extractJson(out);
       const items = Array.isArray(parsed) ? parsed : parsed?.items;
       if (Array.isArray(items) && items.length) {
+        // 备注来源行候选（补审 P2-1 修正）：单笔=整段语境（逗号等分隔符不拆，恢复 v1.14.1
+        // 「午饭，35元 → 午饭」语义）；多笔=按分行符拆行，normalizeItem 按金额唯一命中对应
+        const textTrim = String(text || '').trim();
+        const noteLines = images.length || !textTrim ? null
+          : (items.length === 1
+              ? (/\n/.test(textTrim) ? null : [textTrim])
+              : textTrim.split(/\n|;|；|，|,|。/).map((l) => l.trim()).filter(Boolean));
         return {
           engine: 'llm',
           model: cfg.model,
           items: items.map((it) => normalizeItem(it, ledgerId, {
             sourceText: images.length ? '' : text,
-            // 备注来源行候选（与 parseTextByRules 同一口径分行），兜底时按金额唯一命中对应
-            noteLines: images.length ? null : String(text || '').split(/\n|;|；|，|,|。/).map((l) => l.trim()).filter(Boolean),
+            noteLines,
           })),
           warnings,
         };
