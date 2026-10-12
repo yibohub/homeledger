@@ -860,7 +860,7 @@ function recordDraftFeedback(ledgerId, items) {
 }
 
 /** 规范化单条草稿；sourceText 给出时（纯文字识别），模型给的账户需在原文中有依据，否则交给习惯推荐 */
-function normalizeItem(raw, ledgerId, { sourceText = '' } = {}) {
+function normalizeItem(raw, ledgerId, { sourceText = '', noteFallback = false } = {}) {
   const type = ['expense', 'income', 'transfer'].includes(raw.type) ? raw.type : 'expense';
   const kind = type === 'income' ? 'income' : 'expense';
   const amountCents = Number.isFinite(Number(raw.amount_cents))
@@ -911,16 +911,19 @@ function normalizeItem(raw, ledgerId, { sourceText = '' } = {}) {
     const rec = habitOwnerId(ledgerId, merchant);
     if (rec) { ownerLabel = rec; ownerRecommended = true; }
   }
-  // 备注兜底（草稿卡反馈 2026-10-12）：文字路径模型没给 note 且原文是单行时，以清洗后原文补
-  // （去掉金额表达与常见动词，保留起讫地/事由）——多行原文无法确定行归属，不兜
+  // 备注兜底（草稿卡反馈 2026-10-12）：文字路径模型没给 note 时，以清洗后原文补
+  // （先剥付款方式词——「支付宝」会被动词「支付」撕碎成「宝」（审查 P2-1）——再去金额表达与动词，
+  // 保留起讫地/事由）。收敛为单笔才兜（审查 P2-2）：多行/一行多笔时 sourceText 无法对应到行，
+  // 整段塞给每笔是张冠李戴，比没有更误导。residual 与 merchant 全同时零信息量，不兜（P3-2）。
   let noteOut = raw.note ? String(raw.note).slice(0, 200) : null;
-  if (!noteOut && sourceText && !/\n/.test(sourceText.trim())) {
+  if (!noteOut && noteFallback && sourceText && !/\n/.test(sourceText.trim())) {
     const residual = sourceText
+      .replace(/(支付宝|微信支付|微信|花呗|余额宝|云闪付|信用卡|现金|银行卡|零钱通|白条)/g, ' ')
       .replace(/(?:¥|￥|RMB|CNY)?\s*[\d,]+(?:\.\d{1,2})?\s*(?:元|块钱|块|圆)/gi, ' ')
       .replace(/(花费|支付|付了|付款|消费了?)/g, ' ')
       .replace(/[\s，,。.、:：!！?？\-—_]+/g, ' ')
       .trim();
-    if (residual) noteOut = residual.slice(0, 120);
+    if (residual && residual !== merchant) noteOut = residual.slice(0, 120);
   }
   return {
     draft_id: uid(10),
@@ -1001,7 +1004,11 @@ async function analyzeBill({ images = [], text = '', ledgerId }) {
         return {
           engine: 'llm',
           model: cfg.model,
-          items: items.map((it) => normalizeItem(it, ledgerId, { sourceText: images.length ? '' : text })),
+          items: items.map((it) => normalizeItem(it, ledgerId, {
+            sourceText: images.length ? '' : text,
+            // 单笔才兜备注（审查 P2-2）：多笔时 sourceText 无法对应行，整段塞给每笔是张冠李戴
+            noteFallback: !images.length && items.length === 1,
+          })),
           warnings,
         };
       }
