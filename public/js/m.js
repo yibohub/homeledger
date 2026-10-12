@@ -466,7 +466,9 @@
       if (income || it.type === 'transfer') lumpyIn.disabled = true; // 收入/转账无节奏外推口径，勾选无意义
       lumpyIn.addEventListener('change', () => { it.__lumpyTouched = true; }); // 用户改过勾选，确认时不再按金额重算
       lumpyWrap.appendChild(lumpyIn);
-      lumpyWrap.appendChild(document.createTextNode('一次性大额（不计入月末预测节奏，按统计预勾）'));
+      lumpyWrap.appendChild(document.createTextNode('一次性大额'));
+      // 完整口径挪到悬停说明（维护者反馈 2026-10-12：括号内容太多，草稿卡要简单）
+      lumpyWrap.title = '不计入月末预测节奏（按统计预勾）';
       card.appendChild(lumpyWrap);
     }
 
