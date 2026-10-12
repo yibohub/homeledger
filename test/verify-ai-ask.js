@@ -465,6 +465,10 @@ const noComma = (s) => String(s).replace(/,/g, '');
   ms = prr('12月到2月花了多少');
   check('「12月到2月」无年默认今年起、尾早于首进位下一年', ms && ms.from === `${Y}-12-01` && ms.to === monthEndOf(`${Y + 1}-02`), JSON.stringify(ms));
   check('「13月到2月」非法不解析', prr('13月到2月花了多少') === undefined);
+  ms = prr('今年1月到去年12月花了多少');
+  check('「今年1月到去年12月」显式双年倒挂拒绝（审查 P2-1，不答 2 天窗口）', ms && ms.kind === 'month' && ms.month === `${Y}-01`, JSON.stringify(ms));
+  ms = prr('2026年1月到2025年12月花了多少');
+  check('「2026年1月到2025年12月」显式双年倒挂拒绝（落首月单月）', ms && ms.kind === 'month' && ms.month === '2026-01', JSON.stringify(ms));
 
   /* 星期几单日与周末（此前被整周候选吞掉）；期望值全部由真实 today 推导，任意日期跑均成立 */
   const dowJs = new Date(`${today}T00:00:00`).getDay();
@@ -487,6 +491,10 @@ const noComma = (s) => String(s).replace(/,/g, '');
     && wd.from === shiftDate(wd.to, -1) && wd.label === '周末', JSON.stringify(wd));
   wd = prr('上上周末');
   check('「上上周末」→ 上上周六日', wd && wd.from === shiftDate(monday0, -9) && wd.to === shiftDate(monday0, -8), JSON.stringify(wd));
+  /* 星期几复合区间（审查 P2-2）：未支持跨段时弃候选落回整周超集，不静默少报成单日 */
+  wd = prr('上周日到上周三花了多少');
+  check('「上周日到上周三」复合区间落回整周（不静默答首日单日）', wd && wd.kind === 'between' && wd.label === '上周'
+    && wd.from === shiftDate(monday0, -7) && wd.to === shiftDate(monday0, -1), JSON.stringify(wd));
 
   /* 百位/年位数词（此前落缺省或静默答本月） */
   for (const [t2, n2] of [['最近一百天', 100], ['最近两百天', 200], ['最近一百零五天', 105]]) {

@@ -321,19 +321,24 @@ function parseRangeByRules(text, today) {
     return { kind: 'between', from: mon, to: shiftDay(mon, -6), prevFrom: shiftDay(mon, 7), prevTo: shiftDay(mon, 1), label: '上周' };
   });
   // 星期几单日（批次三）：带这/本/上/上上锚定日历周（可能落未来→反问闸接）；
-  // 裸「周X/星期X」取最近一个过去的同日——花销问法必指过去，周内未来日自动回退
+  // 裸「周X/星期X」取最近一个过去的同日——花销问法必指过去，周内未来日自动回退。
+  // 复合区间探测（审查 P2-2）：「上周日到上周三」未支持跨段，接了会静默少报成单日
+  // （比修前答整周还窄）——检测「到/至/~」续段即弃候选，落回整周超集
+  const FOLLOWED_BY_SPAN_RE = /^\s*(?:到|至|[~～]{1,2})/;
   const DOW_CN = { 日: 0, 天: 0, 一: 1, 1: 1, 二: 2, 2: 2, 三: 3, 3: 3, 四: 4, 4: 4, 五: 5, 5: 5, 六: 6, 6: 6 };
   const dowOfToday = new Date(`${today}T00:00:00`).getDay();
   const weekDowDate = (weekOffset, jsDow) => shiftDay(weekMonday(weekOffset), -(jsDow === 0 ? 6 : jsDow - 1));
   push(/(上上|这|本|上)?(?:个)?(?:周|礼拜|星期)([日天一二三四五六1-6])/, (m) => {
+    if (FOLLOWED_BY_SPAN_RE.test(s.slice(m.index + m[0].length))) return null;
     const js = DOW_CN[m[2]];
     const d = m[1]
       ? weekDowDate(m[1] === '上上' ? -2 : m[1] === '上' ? -1 : 0, js)
       : shiftDay(today, (dowOfToday - js + 7) % 7);
     return { kind: 'between', from: d, to: d, day_label: m[0] };
   });
-  // 周末（周六~周日两天）：裸的取最近一个过去的周末（周日含当天）
+  // 周末（周六~周日两天）：裸的取最近一个过去的周末（周日含当天）；复合区间同样弃选
   push(/(上上|这|本|上)?\s*(?:个)?周末/, (m) => {
+    if (FOLLOWED_BY_SPAN_RE.test(s.slice(m.index + m[0].length))) return null;
     if (!m[1]) {
       const lastSun = shiftDay(today, dowOfToday);
       return { kind: 'between', from: shiftDay(lastSun, 1), to: lastSun, label: '周末' };
@@ -390,6 +395,8 @@ function parseRangeByRules(text, today) {
   const monthSpanOf = (ya, ma, yb, mb) => {
     if (!(ma >= 1 && ma <= 12 && mb >= 1 && mb <= 12)) return null;
     const y2 = yb == null ? (mb < ma ? ya + 1 : ya) : yb;
+    // 显式双年倒挂（「今年1月到去年12月」）拒绝：交 resolveRange 会交换成 2 天窗口+误导 label（审查 P2-1）
+    if (yb != null && (y2 < ya || (y2 === ya && mb < ma))) return null;
     const a = `${ya}-${pad(ma)}`;
     const b = `${y2}-${pad(mb)}`;
     return { kind: 'between', from: monthStart(a), to: monthEnd(b), label: `${ya}年${ma}月 ~ ${y2}年${mb}月` };
@@ -879,7 +886,7 @@ const CLARIFY_SCOPE_TEXT =
  *  （(?<![一-龥]) 只放行非粘着的「近」，「附近/邻近」不误伤） */
 const BARE_RECENT_RE = /(?:最近|近期|过去|(?<![一-龥])近)/;
 const CLARIFY_BARE_RECENT =
-  '「最近」想看多长的时间范围？试试「最近三天」「最近三个月」，或直接说「本周」「本月」。';
+  '想看多长的时间范围？试试「最近三天」「最近三个月」，或直接说「本周」「本月」。';
 
 /**
  * 悬浮球文本查询管线。
