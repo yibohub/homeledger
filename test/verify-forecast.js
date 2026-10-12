@@ -250,9 +250,29 @@ check('仅一笔大额无日常：不出预测（no-activity）', ol.enough === 
 
 /* 预算口径：c1 预算的大额剔除只算 c1 内的（人工标记 1500），c2 的 20000 不混入 */
 const lb = fc.budgetForecast(mkBudget({ ledger_id: lumpyLedger, name: '大额分类预算', scope: 'category', category_id: lc1, amount_cents: 999999, is_active: 0 }), REF);
-check('分类口径：c1 内 lumpy_used=1500（20000 在 c2 不混入）', lb.enough === true && lb.lumpy_used_cents === 1500, JSON.stringify(lb));
+check('分类口径：c1 内 lumpy_used=1500 / lumpy_count=1（20000 在 c2 不混入）',
+  lb.enough === true && lb.lumpy_used_cents === 1500 && lb.lumpy_count === 1, JSON.stringify(lb));
 check('分类口径：used=4500 / dailySpent=3000 / 预测=4500+6300=10800',
   lb.used_cents === 4500 && lb.forecast_cents === 10800, `used=${lb.used_cents} fc=${lb.forecast_cents}`);
+
+/* --- P2 修复回归：防误伤按「相邻配对成链」判定，多峰簇各自成链互不干扰 ---
+ * 造数：8×500 日常 + 同分类两簇 6000×2 与 12000×2 + 另一分类孤立 30000
+ * 阈值：中位数 500 → max(5000, 4000) = 5000；两簇都 ≥ 阈值。
+ * 旧实现（与组中位数比：组中位 9000 ±10% 内 0 笔）会把 4 笔全剔（lumpy=78000）；
+ * 新实现两簇各自成链 → 都不剔，只有孤立 30000 是事件。 */
+const peakLedger = Number(db.createDefaultLedger(uid, '多峰账本'));
+const peakAcc = Number(db.get('SELECT id FROM accounts WHERE ledger_id = ? LIMIT 1', peakLedger).id);
+const pc1 = Number(db.run('INSERT INTO categories (ledger_id, name, kind, parent_id, is_system, sort_order) VALUES (?,?,?,?,0,0)', peakLedger, '多峰用车', 'expense', null).lastInsertRowid);
+const pc2 = Number(db.run('INSERT INTO categories (ledger_id, name, kind, parent_id, is_system, sort_order) VALUES (?,?,?,?,0,0)', peakLedger, '多峰其他', 'expense', null).lastInsertRowid);
+for (const d of ['01', '02', '03', '04', '05', '06', '07', '08']) addLumpyTxn(500, `2026-03-${d}`, { categoryId: pc1, ledger: peakLedger, account: peakAcc });
+addLumpyTxn(6000, '2026-03-02', { categoryId: pc1, ledger: peakLedger, account: peakAcc });
+addLumpyTxn(6000, '2026-03-09', { categoryId: pc1, ledger: peakLedger, account: peakAcc });
+addLumpyTxn(12000, '2026-03-03', { categoryId: pc1, ledger: peakLedger, account: peakAcc });
+addLumpyTxn(12000, '2026-03-08', { categoryId: pc1, ledger: peakLedger, account: peakAcc });
+addLumpyTxn(30000, '2026-03-05', { categoryId: pc2, ledger: peakLedger, account: peakAcc });
+const pk = fc.lumpyOfMonth(peakLedger, '2026-03');
+check('多峰簇：6000×2 与 12000×2 各自成链均不剔，只剔孤立 30000',
+  pk.cents === 30000 && pk.count === 1 && pk.threshold_cents === 5000, JSON.stringify(pk));
 
 /* ============================ B. HTTP 端到端 ============================ */
 
@@ -357,6 +377,13 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   if (forecastable) {
     r = await req('GET', '/reports');
     check('报表页预测条带剔除标注（已剔一次性大额）', r.text.includes('已剔一次性大额'), '');
+    /* 预算页标注（P1 修复回归）：再建一个大额预算避免 already-over 吞掉预测行，
+     lumpy_count=1（500 元人工标记那笔）应渲染「已剔一次性大额 1 笔」 */
+    r = await req('GET', '/budgets');
+    const csrf2 = csrfOf(r.text);
+    await req('POST', '/budgets', { form: { _csrf: csrf2, name: '大额E2E预算', amount: '1000', scope: 'overall', period: 'monthly', alert_pct: '80', trigger_type: 'expense' } });
+    r = await req('GET', '/budgets');
+    check('预算页预测行带剔除标注（已剔一次性大额 1 笔）', r.text.includes('已剔一次性大额 1 笔'), '');
   } else {
     check('月初档跳过剔除标注断言（全局不出预测）', true, `elapsed=${elapsed}`);
   }

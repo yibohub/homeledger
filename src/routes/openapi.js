@@ -271,6 +271,8 @@ router.get('/transactions/recent', (req, res) => {
     count: rows.length,
     transactions: rows.map((r) => ({
       ...r,
+      // 与 GET /transactions 序列化同型：no_rhythm 统一为布尔，不给对接方两种类型
+      no_rhythm: !!Number(r.no_rhythm),
       images: (imgMap.get(Number(r.id)) || []).map((i) => ({ id: i.id, path: `/uploads/${i.rel_path}`, size: i.size })),
     })),
   });

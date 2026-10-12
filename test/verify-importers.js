@@ -332,6 +332,8 @@ const formCsrf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[
   }
 
   /* 导出：/export/csv 全量分页拼接 + BOM + 机读列 */
+  // P7 修订：把一笔种子标为一次性大额，导出→回导后该标记应循环保真（18 列新列）
+  raw.prepare('UPDATE transactions SET no_rhythm=1 WHERE ledger_id=? AND merchant=?').run(homeId, CASES[0].m);
   r = await req('GET', '/export/csv');
   check('导出 CSV 200 且带 UTF-8 BOM', r.status === 200 && r.text.startsWith('\uFEFF'), `HTTP ${r.status}`);
   const exportCsv = r.text.replace(/^\uFEFF/, '');
@@ -372,6 +374,11 @@ const formCsrf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[
       || dst.acc !== c.accName || dst.to_acc !== c.toName) mismatch.push(c.m);
   }
   check('回导落库逐笔保真（类型/金额/日期/账户/对方账户）', mismatch.length === 0, mismatch.join('，') || '14/14 一致');
+  const lumpyRound = raw.prepare('SELECT no_rhythm FROM transactions WHERE ledger_id=? AND merchant=?').get(targetId, CASES[0].m);
+  const lumpyUntouched = raw.prepare('SELECT COUNT(*) AS c FROM transactions WHERE ledger_id=? AND no_rhythm=1 AND merchant!=?').get(targetId, CASES[0].m);
+  check('回导保真：一次性大额标记循环保真且不误标他人（P7 修订 18 列）',
+    lumpyRound && Number(lumpyRound.no_rhythm) === 1 && Number(lumpyUntouched.c) === 0,
+    JSON.stringify({ marked: lumpyRound && Number(lumpyRound.no_rhythm), extra: lumpyUntouched.c }));
 
   /* 重复导入去重 */
   r = await req('POST', '/api/import/preview', { json: { dataUrl: 'data:text/csv;base64,' + exportB64, fileName: 'export-2.csv' } });

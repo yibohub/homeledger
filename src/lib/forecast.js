@@ -69,10 +69,12 @@ function medianOf(arr) {
  * 判定（数字靠统计，全部 SQL+算术可溯源）：
  *   · 人工标记 no_rhythm=1（草稿卡/手动表单「一次性大额」勾选）→ 事实级信号，必剔；
  *   · 统计判定：单笔 ≥ max(本月单笔中位数 × LUMPY_K, LUMPY_FLOOR_CENTS)；
- *   · 防误伤：同分类内金额相近（±10% 于组中位数）的大额 ≥2 笔视为本月节奏，不剔
- *     （每周加油的家庭第二次加油不该被当事件；金额孤立的大额仍是事件）。
+ *   · 防误伤：同分类内金额成链（排序后相邻两笔差 ≤ 较大者×10%）的大额 ≥2 笔视为
+ *     本月节奏，不剔——相邻配对而非「与组中位数比」，多峰簇（保养 200×2 + 保险 400×2）
+ *     各自成链互不干扰，簇间的孤立大额仍是事件。
  * 系统固定扣费（subscription/recurring）不参与统计：它们已由固定拆分/日历精算接管，
  * 混进中位数反而把阈值抬高。中位数对大额自身免疫（5000 不动摇 9 块钱的中位数）。
+ * 无分类（category_id NULL）的大额各自成组：NULL 不等于「同分类」，互不豁免。
  * @returns {{cents:number, count:number, ids:number[], threshold_cents:number}}
  */
 function lumpyOfMonth(ledgerId, month) {
@@ -92,16 +94,25 @@ function lumpyOfMonth(ledgerId, month) {
     const big = stats.filter((r) => Number(r.amt) >= threshold);
     const byCat = new Map();
     for (const r of big) {
-      const key = r.category_id == null ? 0 : Number(r.category_id);
+      // NULL 分类各自成组（键含 id）：两笔不相关的未分类大额不能互相豁免
+      const key = r.category_id == null ? `n${r.id}` : Number(r.category_id);
       if (!byCat.has(key)) byCat.set(key, []);
       byCat.get(key).push(r);
     }
     for (const group of byCat.values()) {
       if (group.length >= 2) {
-        const med = medianOf(group.map((g) => Number(g.amt)));
-        const rhythm = group.filter((g) => Math.abs(Number(g.amt) - med) <= med * LUMPY_REPEAT_TOL);
-        if (rhythm.length >= 2) {
-          for (const g of group) if (!rhythm.includes(g)) lumpy.push(g); // 组内金额孤立的大额仍是事件
+        const sorted = [...group].sort((a, b) => Number(a.amt) - Number(b.amt));
+        const clusters = [[sorted[0]]];
+        for (let i = 1; i < sorted.length; i++) {
+          const prev = Number(sorted[i - 1].amt);
+          const cur = Number(sorted[i].amt);
+          if (cur - prev <= Math.max(prev, cur) * LUMPY_REPEAT_TOL) clusters[clusters.length - 1].push(sorted[i]);
+          else clusters.push([sorted[i]]);
+        }
+        const rhythmic = clusters.filter((c) => c.length >= 2);
+        if (rhythmic.length) {
+          const rhythmicSet = new Set(rhythmic.flat());
+          for (const g of group) if (!rhythmicSet.has(g)) lumpy.push(g); // 簇外的孤立大额仍是事件
           continue;
         }
       }
@@ -117,13 +128,15 @@ function lumpyOfMonth(ledgerId, month) {
 }
 
 /**
- * 预算口径内的大额合计：lumpyOfMonth 给出的 id 集与预算 scope/type 条件求交
- * （口径条件与 budgetUsedInRange 完全一致，剔除与已用才可比）
+ * 预算口径内的大额合计与笔数：lumpyOfMonth 给出的 id 集与预算 scope/type 条件求交
+ * （口径条件与 budgetUsedInRange 完全一致，剔除与已用才可比）；计数必须是
+ * scope 交集后的笔数，账本级 lump.count 会把口径外的大额也数进来
+ * @returns {{cents:number, count:number}}
  */
-function lumpyCentsInScope(b, ids, range) {
-  if (!ids.length) return 0;
+function lumpyInScope(b, ids, range) {
+  if (!ids.length) return { cents: 0, count: 0 };
   const params = [b.ledger_id, range.start, range.end, ...ids];
-  let sql = `SELECT COALESCE(SUM(amount_base_cents),0) AS s FROM transactions
+  let sql = `SELECT COALESCE(SUM(amount_base_cents),0) AS s, COUNT(*) AS c FROM transactions
              WHERE ledger_id = ? AND deleted_at IS NULL AND txn_date BETWEEN ? AND ?
                AND id IN (${ids.map(() => '?').join(',')})
                AND type IN (${EXPENSE_TYPES.map(() => '?').join(',')})`;
@@ -135,7 +148,8 @@ function lumpyCentsInScope(b, ids, range) {
     sql += ' AND account_id = ?';
     params.push(b.account_id);
   }
-  return Number(get(sql, ...params)?.s || 0);
+  const r = get(sql, ...params);
+  return { cents: Number(r?.s || 0), count: Number(r?.c || 0) };
 }
 
 /**
@@ -255,21 +269,22 @@ function budgetForecast(b, ref = new Date()) {
 
   const fixedUsed = sch.budgetUsedInRange(b, range.start, range.end, { fixedOnly: true });
   const lump = lumpyOfMonth(b.ledger_id, month);
-  const lumpyUsed = lumpyCentsInScope(b, lump.ids, range);
+  const lumpIn = lumpyInScope(b, lump.ids, range);
+  const lumpyUsed = lumpIn.cents;
   const known = knownFutureCents({
     ledger_id: b.ledger_id, fromDate: today, toDate: range.end,
     scope: b.scope, category_id: b.category_id, account_id: b.account_id,
   });
   const dailySpent = used - fixedUsed - lumpyUsed;
   if (dailySpent <= 0 && known === 0) {
-    return { enough: false, reason: 'no-activity', ...base, used_cents: used, lumpy_used_cents: lumpyUsed };
+    return { enough: false, reason: 'no-activity', ...base, used_cents: used, lumpy_used_cents: lumpyUsed, lumpy_count: lumpIn.count };
   }
 
   const forecast = used + known + Math.round((dailySpent * remaining) / elapsed);
   return {
     enough: true, ...base,
     used_cents: used, fixed_used_cents: fixedUsed, known_future_cents: known,
-    lumpy_used_cents: lumpyUsed,
+    lumpy_used_cents: lumpyUsed, lumpy_count: lumpIn.count,
     forecast_cents: forecast,
     ratio_forecast: (forecast / amount) * 100,
     will_over: forecast > amount,
@@ -311,5 +326,5 @@ function checkForecasts(ref = new Date()) {
 
 module.exports = {
   monthForecast, budgetForecast, checkForecasts, knownFutureCents, spentOfMonth,
-  lumpyOfMonth, lumpyCentsInScope, MIN_ELAPSED_DAYS, LUMPY_K, LUMPY_FLOOR_CENTS,
+  lumpyOfMonth, lumpyInScope, MIN_ELAPSED_DAYS, LUMPY_K, LUMPY_FLOOR_CENTS,
 };

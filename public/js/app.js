@@ -515,6 +515,8 @@
         const it = data.items[Number(card.dataset.i)];
         const catSel = $('.d-category', card);
         const accSel = $('.d-account', card);
+        const lumpyEl = $('.d-lumpy', card);
+        if (lumpyEl) lumpyEl.addEventListener('change', () => { card._lumpyTouched = true; }); // 用户改过勾选，提交时不再按金额重算
         const kind = it.type === 'income' ? 'income' : 'expense';
         catSel.innerHTML = '<option value="">未分类</option>' + cfg.categories
           .filter((c) => c.kind === kind)
@@ -545,16 +547,23 @@
         e.preventDefault();
         const items = $$('.draft', resultBox).map((card) => {
           const d = (resultBox.__drafts || [])[Number(card.dataset.i)] || {};
+          const type = $('.d-type', card).value;
+          const amountCents = Math.round(parseFloat($('.d-amount', card).value || '0') * 100);
+          // 预勾与提交前改金额脱钩：没手动改过勾选时按当前金额重算（¥6000 改 ¥30 不该带着标记入库）
+          const lumpyEl = $('.d-lumpy', card);
+          if (lumpyEl && !card._lumpyTouched && type === 'expense' && d.no_rhythm_threshold) {
+            lumpyEl.checked = amountCents >= d.no_rhythm_threshold;
+          }
           return {
-            type: $('.d-type', card).value,
-            amount_cents: Math.round(parseFloat($('.d-amount', card).value || '0') * 100),
+            type,
+            amount_cents: amountCents,
             txn_date: $('.d-date', card).value,
             category_id: $('.d-category', card).value || null,
             account_id: $('.d-account', card).value || null,
             merchant: $('.d-merchant', card).value.trim(),
             note: $('.d-note', card).value.trim(),
             owner_label: ($('.d-owner', card).value || '').trim() || null,
-            no_rhythm: $('.d-lumpy', card) && $('.d-lumpy', card).checked ? 1 : 0,
+            no_rhythm: lumpyEl && lumpyEl.checked ? 1 : 0,
             // P12：识别时的推荐快照（编辑前的原值），服务端据此记习惯负反馈
             rec_snapshot: { category_id: d.category_id, account_id: d.account_id, owner_label: d.owner_label || null, type: d.type },
           };
