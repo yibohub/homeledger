@@ -126,6 +126,11 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
       && js.text.indexOf("vv.addEventListener('resize'") > -1
       && js.text.indexOf("vv.addEventListener('resize'") < js.text.indexOf("getElementById('mCapture')"), '');
   check('m.js 问句分支渲染回答卡（answer/clarify）', js.status === 200 && js.text.includes("data.mode === 'answer'") && js.text.includes('m-answer'), '');
+  check('m.js 点输入框即清问账回答卡（维护者真机反馈 2026-10-12：连续问账卡堆撑高捕获区被键盘居中顶出视口；只清 .m-answer 不碰草稿卡 .m-draft）',
+    js.status === 200 && js.text.includes("textEl.addEventListener('focus'")
+      && js.text.indexOf("textEl.addEventListener('focus'") < js.text.indexOf('goBtn.addEventListener')
+      && /querySelectorAll\('\.m-answer'\)\.forEach\(\(c\) => c\.remove\(\)\)/.test(js.text)
+      && js.text.includes(".m-draft"), '');
   check('m.js 拍单按钮判空（只读视图无 mCam 不报错）', js.status === 200 && js.text.includes('if (camBtn)'), '');
   check('m.js 识别 busy 反馈（图标旋转 + 「识别中…」+ finally 复原文案，AI 返回前不误认为卡死）',
     js.status === 200 && js.text.includes("classList.add('busy')") && js.text.includes('识别中…')

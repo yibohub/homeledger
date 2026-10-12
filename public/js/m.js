@@ -213,6 +213,12 @@
   textEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); recognize(); }
   });
+  // 点输入框开始新一轮输入即清掉问账回答卡（维护者反馈 2026-10-12：连续问账后卡堆
+  // 撑高捕获区，键盘弹出居中被顶出视口，看不到正在输入的文本）——输入时视野干净，
+  // 堆积也不会发生（每次提问必先点输入框）；草稿卡 .m-draft 是待确认数据，绝不清
+  textEl.addEventListener('focus', () => {
+    draftsEl.querySelectorAll('.m-answer').forEach((c) => c.remove());
+  });
   goBtn.addEventListener('click', recognize);
 
   /* --------------------------- 识别 → 草稿卡片 --------------------------- */
