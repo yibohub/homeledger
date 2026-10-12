@@ -141,6 +141,10 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   check('m.js 多笔草稿头部数字标签（序号/总数嵌头行不占行，单笔不显示）',
     js.status === 200 && js.text.includes('m-draft-count') && js.text.includes("draftCard(it, idx, total)")
       && js.text.includes('if (total > 1) {'), '');
+  check('m.js 徽标参照节点先入栈（append amt 先于 insertBefore(cnt, amt)，修 NotFoundError 回归锁）',
+    js.status === 200
+      && js.text.indexOf('head.appendChild(amt);') > -1
+      && js.text.indexOf('head.appendChild(amt);') < js.text.indexOf('head.insertBefore(cnt, amt)'), '');
   // 逐卡确认批（维护者定案 2026-10-12）：首卡=第一条记录 + 确认不刷新自动推进
   check('m.js 首卡=第一条记录（fragment 正序整组插栈顶，修旧循环反序）',
     js.status === 200 && js.text.includes('createDocumentFragment') && js.text.includes('insertBefore(frag'), '');

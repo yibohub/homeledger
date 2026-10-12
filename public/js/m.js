@@ -332,7 +332,9 @@
     amt.className = 'amt ' + (income ? 'income' : 'expense');
     amt.textContent = (income ? '+' : '−') + fmt(it.amount_cents);
     head.appendChild(title);
-    // 多笔识别时标序号/总数（数字标签嵌在头行，不占独立行；单笔不显示）
+    head.appendChild(amt);
+    // 多笔识别时标序号/总数（数字标签嵌在头行，不占独立行；单笔不显示）。
+    // insertBefore 的参照节点必须已在 head 内：先 append amt 再插 cnt（修「not a child of this node」）
     if (total > 1) {
       const cnt = document.createElement('span');
       cnt.className = 'm-draft-count';
@@ -340,7 +342,6 @@
       cnt.title = '共 ' + total + ' 笔草稿，逐张确认';
       head.insertBefore(cnt, amt);
     }
-    head.appendChild(amt);
     card.appendChild(head);
 
     // 金额（可改）：数字键盘
