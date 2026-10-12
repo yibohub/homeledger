@@ -453,6 +453,62 @@ const noComma = (s) => String(s).replace(/,/g, '');
   a2c = await aiAsk.handleAssistantText({ text: '你好', ledgerId, today });
   check('闲聊无 Key → null 原样交记账', a2c === null);
 
+  console.log('\n=== A2d. 批次三收尾：月级跨段 / 星期几单日与周末 / 百位年位数词 ===\n');
+
+  /* 月级跨段（此前只答第一个时间词） */
+  let ms = prr('去年12月到今年2月花了多少');
+  check('「去年12月到今年2月」→ 跨年月级区间+人话 label', ms && ms.kind === 'between'
+    && ms.from === `${Y - 1}-12-01` && ms.to === monthEndOf(`${Y}-02`)
+    && ms.label === `${Y - 1}年12月 ~ ${Y}年2月`, JSON.stringify(ms));
+  ms = prr('2025年10月到12月花了多少');
+  check('「2025年10月到12月」→ 显式年，尾年省略取同年', ms && ms.from === '2025-10-01' && ms.to === '2025-12-31', JSON.stringify(ms));
+  ms = prr('12月到2月花了多少');
+  check('「12月到2月」无年默认今年起、尾早于首进位下一年', ms && ms.from === `${Y}-12-01` && ms.to === monthEndOf(`${Y + 1}-02`), JSON.stringify(ms));
+  check('「13月到2月」非法不解析', prr('13月到2月花了多少') === undefined);
+
+  /* 星期几单日与周末（此前被整周候选吞掉）；期望值全部由真实 today 推导，任意日期跑均成立 */
+  const dowJs = new Date(`${today}T00:00:00`).getDay();
+  const monday0 = shiftDate(today, -((dowJs + 6) % 7));
+  let wd = prr('上周日花了多少');
+  check('「上周日」→ 上周日历周的单日（非整周）', wd && wd.kind === 'between' && wd.from === shiftDate(monday0, -1)
+    && wd.to === wd.from && wd.day_label === '上周日', JSON.stringify(wd));
+  wd = prr('上个礼拜天花了多少');
+  check('「上个礼拜天」同上周日', wd && wd.from === shiftDate(monday0, -1), JSON.stringify(wd));
+  wd = prr('这周六花了多少');
+  check('「这周六」→ 本日历周六（落未来由反问闸接）', wd && wd.from === shiftDate(monday0, 5) && wd.to === wd.from && wd.day_label === '这周六', JSON.stringify(wd));
+  wd = prr('星期三花了多少');
+  check('裸「星期三」→ 最近一个过去的三（花销必指过去）', wd && wd.from === shiftDate(today, -((dowJs - 3 + 7) % 7)) && wd.to === wd.from, JSON.stringify(wd));
+  wd = prr('周日花了多少');
+  check('裸「周日」→ 最近的过去周日（今天恰周日取今天）', wd && wd.from === shiftDate(today, -dowJs) && wd.to === wd.from, JSON.stringify(wd));
+  wd = prr('上周末花了多少');
+  check('「上周末」→ 上周六~周日两天（非整周）', wd && wd.from === shiftDate(monday0, -2) && wd.to === shiftDate(monday0, -1) && wd.label === '上周末', JSON.stringify(wd));
+  wd = prr('周末花了多少');
+  check('裸「周末」→ 最近一个过去的周六~周日且 from≤to', wd && wd.to === shiftDate(today, -dowJs)
+    && wd.from === shiftDate(wd.to, -1) && wd.label === '周末', JSON.stringify(wd));
+  wd = prr('上上周末');
+  check('「上上周末」→ 上上周六日', wd && wd.from === shiftDate(monday0, -9) && wd.to === shiftDate(monday0, -8), JSON.stringify(wd));
+
+  /* 百位/年位数词（此前落缺省或静默答本月） */
+  for (const [t2, n2] of [['最近一百天', 100], ['最近两百天', 200], ['最近一百零五天', 105]]) {
+    const rd3 = prr(t2);
+    check(`「${t2}」→ days:${n2}（百位数词）`, rd3 && rd3.kind === 'days' && rd3.days === n2, JSON.stringify(rd3));
+  }
+  let cn = prr('一百零五天前花了多少');
+  check('「一百零五天前」→ 单日 105 天前（零字不断链）', cn && cn.from === shiftDate(today, -105) && cn.day_label === '105天前', JSON.stringify(cn));
+  check('「最近九百九十九天」超 366 上限宁缺毋错不解析', prr('最近九百九十九天花了多少') === undefined);
+  check('「最近三百六十七天」超 366 上限不解析（阿拉伯数字同口径）', prr('最近三百六十七天花了多少') === undefined && prr('最近367天花了多少') === undefined);
+  cn = prr('过去两年花了多少');
+  check('「过去两年」→ 近 24 个月（年量词）', cn && cn.kind === 'months' && cn.months === 24, JSON.stringify(cn));
+  check('「近三年」=36 个月超月数钳制不解析（交反问，不静默答 24）', prr('近三年花了多少') === undefined);
+
+  /* 反问闸兜住超钳制形态（近三年/过去十年） */
+  a2c = await aiAsk.handleAssistantText({ text: '近三年花了多少', ledgerId, today });
+  check('「近三年」（超月数钳制）→ 反问而非静默答本月', a2c.mode === 'clarify' && a2c.text.includes('时间范围'), a2c.text);
+  a2c = await aiAsk.handleAssistantText({ text: '过去十年花了多少', ledgerId, today });
+  check('「过去十年」→ 反问（年量词仅支持一两年）', a2c.mode === 'clarify', a2c.text);
+  a2c = await aiAsk.handleAssistantText({ text: '12月到2月花了多少', ledgerId, today: '2026-10-12' });
+  check('「12月到2月」（无年，起点未来）→ 反问还没到', a2c.mode === 'clarify' && a2c.text.includes('还没到'), a2c.text);
+
   console.log('\n=== B. 记账/查账隐式分流 + 五类问法（HTTP 端到端 8099，规则引擎）===\n');
   let up = true;
   try { await fetch(BASE + '/login'); } catch { up = false; }
@@ -517,6 +573,15 @@ const noComma = (s) => String(s).replace(/,/g, '');
     && r.json.data && r.json.data.label === '最近 3 天' && r.json.engine === 'rule', r.json.text);
   r = await req('POST', '/api/ai/chat', { json: { text: '本周花了多少' } });
   check('问「本周」答本周窗口（非本月缺省）', r.json.mode === 'answer' && r.json.data && r.json.data.label === '本周', r.json.text);
+
+  /* --- 查询分支：批次三回归（月级跨段/星期几/年量词）--- */
+  r = await req('POST', '/api/ai/chat', { json: { text: '2025年12月到2026年2月花了多少' } });
+  check('问「2025年12月到2026年2月」答跨年月级区间（非只答首月）', r.json.mode === 'answer'
+    && r.json.data && r.json.data.label === '2025年12月 ~ 2026年2月', r.json.text);
+  r = await req('POST', '/api/ai/chat', { json: { text: '上周日花了多少' } });
+  check('问「上周日」答单日（非整周）', r.json.mode === 'answer' && r.json.data && r.json.data.label.includes('（上周日）'), r.json.text);
+  r = await req('POST', '/api/ai/chat', { json: { text: '过去两年花了多少' } });
+  check('问「过去两年」答近 24 个月（非本月缺省）', r.json.mode === 'answer' && r.json.data && r.json.data.label === '近 24 个月', r.json.text);
 
   /* --- 查询分支：预算 --- */
   r = await req('GET', '/budgets');
