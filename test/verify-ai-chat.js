@@ -13,6 +13,13 @@
 const http = require('node:http');
 const BASE = 'http://127.0.0.1:8099';
 
+// DATA_DIR 守卫（PR #34 审查事故）：本套件中途 require('../src/db') 直写 settings，
+// 不传 DATA_DIR 会打开 ./data 真实库（5111 在用）——其他套件均有同款守卫，仅此处曾遗漏
+if (!process.env.DATA_DIR) {
+  console.log('  SKIP  手工运行必须带 DATA_DIR=<8099 实例的数据目录>（run-all 自动传入），避免直写真实库');
+  process.exit(0);
+}
+
 let pass = 0, fail = 0;
 function check(name, ok, detail = '') {
   if (ok) { pass++; console.log(`  PASS  ${name}${detail ? '  — ' + detail : ''}`); }
@@ -50,6 +57,11 @@ const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
   /* --- 未登录拒绝 --- */
   let r = await req('POST', '/api/ai/chat', { json: { text: '午饭 10 元' } });
   check('未登录 POST 被拒', r.status !== 200, `HTTP ${r.status}`);
+
+  // 提示词规则（草稿卡反馈 2026-10-12）：商家/备注提取规则必须存在——「备注为空、起讫地/事由丢失」的根因修复
+  const aiSrc = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'src', 'lib', 'ai.js'), 'utf8');
+  check('SYSTEM_PROMPT 含商家/备注提取规则（起讫地/事由保留不丢）',
+    aiSrc.includes('起讫地') && aiSrc.includes('湘潭北到长沙友谊路'), '');
 
   /* --- 登录 --- */
   r = await req('GET', '/login');
@@ -206,6 +218,19 @@ const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
   r = await req('POST', '/api/ai/chat', { json: { text: '买理财 10000 元' }, cookie });
   check('歧义词（买理财）不拦截', r.json?.engine === 'llm' && mockCalls === beforeSensitive + 4,
     `engine=${r.json?.engine} calls=${mockCalls - beforeSensitive}`);
+
+  // 备注兜底（草稿卡反馈 2026-10-12）：模型没给 note 时，文字路径以清洗后原文补（起讫地/事由不丢）
+  r = await req('POST', '/api/ai/text', { json: { text: '湘潭北到长沙友谊路地铁花费6.3元' }, cookie });
+  check('语境文本走模型（非敏感不误拦）', r.json?.engine === 'llm' && r.json.items?.length === 1,
+    `engine=${r.json?.engine} items=${r.json?.items?.length}`);
+  check('模型空备注时以原文语境兜底（起讫地保留）',
+    (r.json.items || [])[0]?.note === '湘潭北到长沙友谊路地铁', JSON.stringify((r.json.items || [])[0]?.note));
+  r = await req('POST', '/api/ai/text', { json: { text: '微信支付35元买奶茶' }, cookie });
+  check('兜底先剥付款方式词（微信支付不残留、动词不撕词）',
+    (r.json.items || [])[0]?.note === '买奶茶', JSON.stringify((r.json.items || [])[0]?.note));
+  r = await req('POST', '/api/ai/text', { json: { text: '支付宝支付35元' }, cookie });
+  check('清洗后无语境则不硬兜（「支付宝」不被动词撕成「宝」）',
+    !(r.json.items || [])[0]?.note, JSON.stringify((r.json.items || [])[0]?.note));
 
   await new Promise((res2) => mock.close(res2));
   db.setSetting('ai.enabled', 'false');

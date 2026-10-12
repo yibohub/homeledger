@@ -397,7 +397,12 @@
       if (it.account_recommended) {
         const hint = document.createElement('span');
         hint.className = 'm-draft-hint';
-        hint.textContent = '按习惯推荐，可改';
+        // 紧凑「习惯」标签：完整说明放 title（维护者反馈 2026-10-12：长文案挤压账户下拉框）
+        hint.textContent = '习惯';
+        hint.title = '按习惯推荐，可改';
+        hint.style.padding = '1px 6px';
+        hint.style.border = '1px solid currentColor';
+        hint.style.borderRadius = '8px';
         accRow.appendChild(hint);
       }
       card.appendChild(accRow);
@@ -445,23 +450,25 @@
     card.appendChild(dl);
     card.appendChild(ownerRow);
 
-    // 一次性大额（P7 修订，可勾）：服务端按本月大额线统计预勾，事实级信号——预测节奏外推必剔
-    const lumpyWrap = document.createElement('label');
-    lumpyWrap.className = 'm-draft-sub';
-    lumpyWrap.style.display = 'flex';
-    lumpyWrap.style.alignItems = 'center';
-    lumpyWrap.style.gap = '6px';
-    const lumpyIn = document.createElement('input');
-    lumpyIn.type = 'checkbox';
-    lumpyIn.className = 'm-lumpy';
-    lumpyIn.checked = !!it.no_rhythm_suggested;
-    if (income || it.type === 'transfer') lumpyIn.disabled = true; // 收入/转账无节奏外推口径，勾选无意义
-    lumpyIn.addEventListener('change', () => { it.__lumpyTouched = true; }); // 用户改过勾选，确认时不再按金额重算
-    lumpyWrap.appendChild(lumpyIn);
-    lumpyWrap.appendChild(document.createTextNode(
-      '一次性大额（不计入月末预测节奏）' + (it.no_rhythm_suggested ? '（按统计预勾）' : '')
-    ));
-    card.appendChild(lumpyWrap);
+    // 一次性大额（P7 修订）：仅服务端判定为大额（no_rhythm_suggested=1）时才渲染，
+    // 小额不出现、减少视觉噪音（维护者反馈 2026-10-12）；未渲染 = 不标记，统计层照常自动判
+    let lumpyIn = null;
+    if (it.no_rhythm_suggested) {
+      const lumpyWrap = document.createElement('label');
+      lumpyWrap.className = 'm-draft-sub';
+      lumpyWrap.style.display = 'flex';
+      lumpyWrap.style.alignItems = 'center';
+      lumpyWrap.style.gap = '6px';
+      lumpyIn = document.createElement('input');
+      lumpyIn.type = 'checkbox';
+      lumpyIn.className = 'm-lumpy';
+      lumpyIn.checked = true;
+      if (income || it.type === 'transfer') lumpyIn.disabled = true; // 收入/转账无节奏外推口径，勾选无意义
+      lumpyIn.addEventListener('change', () => { it.__lumpyTouched = true; }); // 用户改过勾选，确认时不再按金额重算
+      lumpyWrap.appendChild(lumpyIn);
+      lumpyWrap.appendChild(document.createTextNode('一次性大额（不计入月末预测节奏，按统计预勾）'));
+      card.appendChild(lumpyWrap);
+    }
 
     const ops = document.createElement('div');
     ops.className = 'm-draft-ops';
@@ -493,10 +500,10 @@
         item.note = noteIn.value.trim();
         item.owner_label = ownerIn.value.trim() || null;
         // 预勾与确认前改金额脱钩：没手动改过勾选时按当前金额重算（¥6000 改 ¥30 不该带着标记入库）
-        if (!it.__lumpyTouched && !income && it.type !== 'transfer' && it.no_rhythm_threshold) {
+        if (lumpyIn && !it.__lumpyTouched && !income && it.type !== 'transfer' && it.no_rhythm_threshold) {
           lumpyIn.checked = item.amount_cents >= it.no_rhythm_threshold;
         }
-        item.no_rhythm = lumpyIn.checked ? 1 : 0;
+        item.no_rhythm = lumpyIn && lumpyIn.checked ? 1 : 0;
         const res = await fetch('/api/ai/confirm', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf, Accept: 'application/json' },
@@ -536,10 +543,14 @@
     }
     // 附件按「数量一致一一对应」的既有约定挂到对应草稿；数量不一致时只有第一张卡携带，
     // 其余不带——服务端约定是全挂第一笔，多卡都带会让后确认的把附件抢走
+    let topCard = null;
     data.items.forEach((it, idx) => {
       const card = draftCard(it);
       card._imageIds = data.items.length === (imageIds || []).length ? [imageIds[idx]].filter(Boolean) : (idx === 0 ? (imageIds || []).slice(0, 1) : []);
       draftsEl.insertBefore(card, draftsEl.firstChild);
+      topCard = card;
     });
+    // 草稿卡生成在屏幕外（维护者反馈 2026-10-12）：渲染后自动居中，一眼看到卡与「确认入库」、无需滚动
+    if (topCard) requestAnimationFrame(() => topCard.scrollIntoView({ behavior: 'smooth', block: 'center' }));
   }
 })();

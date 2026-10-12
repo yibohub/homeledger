@@ -551,7 +551,10 @@ const SYSTEM_PROMPT = `你是一个专业的记账助手，负责把「账单截
 6. category_name 必须从给定的分类列表中选择最贴近的「完整路径」，若都不合适则选「其他支出/其他」这类兜底项。
 7. 只有账单原文里明确写出了付款方式（如「支付宝」「微信」「现金」「银行卡」等字样），acct 才填对应账户名；原文没有提到付款方式时 acct 必须留空字符串，绝不要猜测或按常识默认。
 8. for_member 是「这笔钱为谁花/为谁办」（如给老妈买药→"老妈"，与谁记账无关）：只从给出的「消费归属人候选」名单里选一个最匹配的，原文没有提到任何家人时必须留空字符串，绝不要用记账用户名单来填。
-9. confidence 为 0~1 的小数，表示你对这笔提取的把握。
+9. merchant 填交易对象/场所/渠道（如商户名、车站、线路、平台），原文没有明确对象时留空字符串；
+   note 保留原文中的语境信息（起讫地、事由等，如「湘潭北到长沙友谊路地铁花费6.3元」的 note 填
+   「湘潭北到长沙友谊路」）——不要把金额、日期、付款方式重复进 note，没有语境信息时留空字符串。
+10. confidence 为 0~1 的小数，表示你对这笔提取的把握。
 输出格式：
 {"items":[{"type":"expense","amount":35.00,"txn_date":"2026-09-15","merchant":"肯德基","note":"午餐","category_name":"餐饮/午餐","acct":"支付宝","for_member":"","currency":"CNY","confidence":0.95}]}`;
 
@@ -857,7 +860,7 @@ function recordDraftFeedback(ledgerId, items) {
 }
 
 /** 规范化单条草稿；sourceText 给出时（纯文字识别），模型给的账户需在原文中有依据，否则交给习惯推荐 */
-function normalizeItem(raw, ledgerId, { sourceText = '' } = {}) {
+function normalizeItem(raw, ledgerId, { sourceText = '', noteFallback = false } = {}) {
   const type = ['expense', 'income', 'transfer'].includes(raw.type) ? raw.type : 'expense';
   const kind = type === 'income' ? 'income' : 'expense';
   const amountCents = Number.isFinite(Number(raw.amount_cents))
@@ -908,6 +911,20 @@ function normalizeItem(raw, ledgerId, { sourceText = '' } = {}) {
     const rec = habitOwnerId(ledgerId, merchant);
     if (rec) { ownerLabel = rec; ownerRecommended = true; }
   }
+  // 备注兜底（草稿卡反馈 2026-10-12）：文字路径模型没给 note 时，以清洗后原文补
+  // （先剥付款方式词——「支付宝」会被动词「支付」撕碎成「宝」（审查 P2-1）——再去金额表达与动词，
+  // 保留起讫地/事由）。收敛为单笔才兜（审查 P2-2）：多行/一行多笔时 sourceText 无法对应到行，
+  // 整段塞给每笔是张冠李戴，比没有更误导。residual 与 merchant 全同时零信息量，不兜（P3-2）。
+  let noteOut = raw.note ? String(raw.note).slice(0, 200) : null;
+  if (!noteOut && noteFallback && sourceText && !/\n/.test(sourceText.trim())) {
+    const residual = sourceText
+      .replace(/(支付宝|微信支付|微信|花呗|余额宝|云闪付|信用卡|现金|银行卡|零钱通|白条)/g, ' ')
+      .replace(/(?:¥|￥|RMB|CNY)?\s*[\d,]+(?:\.\d{1,2})?\s*(?:元|块钱|块|圆)/gi, ' ')
+      .replace(/(花费|支付|付了|付款|消费了?)/g, ' ')
+      .replace(/[\s，,。.、:：!！?？\-—_]+/g, ' ')
+      .trim();
+    if (residual && residual !== merchant) noteOut = residual.slice(0, 120);
+  }
   return {
     draft_id: uid(10),
     type,
@@ -915,7 +932,7 @@ function normalizeItem(raw, ledgerId, { sourceText = '' } = {}) {
     currency: raw.currency || 'CNY',
     txn_date: /^\d{4}-\d{2}-\d{2}$/.test(String(raw.txn_date || '')) ? raw.txn_date : todayStr(),
     merchant,
-    note: raw.note ? String(raw.note).slice(0, 200) : null,
+    note: noteOut,
     category_id: categoryId,
     category_name: catName,
     category_recommended: categoryRecommended,
@@ -987,7 +1004,11 @@ async function analyzeBill({ images = [], text = '', ledgerId }) {
         return {
           engine: 'llm',
           model: cfg.model,
-          items: items.map((it) => normalizeItem(it, ledgerId, { sourceText: images.length ? '' : text })),
+          items: items.map((it) => normalizeItem(it, ledgerId, {
+            sourceText: images.length ? '' : text,
+            // 单笔才兜备注（审查 P2-2）：多笔时 sourceText 无法对应行，整段塞给每笔是张冠李戴
+            noteFallback: !images.length && items.length === 1,
+          })),
           warnings,
         };
       }
