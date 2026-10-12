@@ -22,6 +22,7 @@ const att = require('../lib/attachments');
 const subs = require('../lib/subscriptions');
 const sch = require('../lib/scheduler');
 const u = require('../lib/util');
+const aiInputs = require('../lib/ai-inputs');
 
 const router = express.Router();
 
@@ -638,6 +639,13 @@ router.post('/ai/bill', requireWrite, async (req, res) => {
     const warnings = [...(result.warnings || []), ...saveWarnings];
 
     if (!confirm) {
+      // P15 识别原文落库：预览分支（confirm=false 不入库，无 txn 可挂）
+      aiInputs.record({
+        ledgerId, userId, source: 'api',
+        engine: result.engine, model: result.model || null,
+        inputText: text, imageCount: images.length, itemCount: result.items.length,
+        attachmentId: savedImages[0]?.id || null,
+      });
       return ok(res, {
         engine: result.engine, model: result.model || null,
         warnings, drafts: result.items, confirmed: false,
@@ -681,6 +689,13 @@ router.post('/ai/bill', requireWrite, async (req, res) => {
 
     auth.audit(req, 'api.ai.bill', {
       ledgerId, detail: `开放API·${req.openAuth.tokenName} ${result.engine} 识别并入库 ${created.length} 笔，图片 ${savedImages.length} 张`,
+    });
+    // P15 识别原文落库：confirm 入库分支（first_txn_id 供撤销后回溯原文）
+    aiInputs.record({
+      ledgerId, userId, source: 'api',
+      engine: result.engine, model: result.model || null,
+      inputText: text, imageCount: images.length, itemCount: result.items.length,
+      attachmentId: savedImages[0]?.id || null, firstTxnId: created[0] || null,
     });
     res.json({
       ok: created.length > 0,

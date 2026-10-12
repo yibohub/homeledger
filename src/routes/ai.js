@@ -11,6 +11,7 @@ const att = require('../lib/attachments');
 
 const router = express.Router();
 const fc = require('../lib/forecast');
+const aiInputs = require('../lib/ai-inputs');
 
 /**
  * 草稿卡「一次性大额」预勾建议（P7 修订人工标记层）：
@@ -80,6 +81,13 @@ router.post('/api/ai/scan', auth.requireLogin, auth.requireLedgerWrite, async (r
     auth.audit(req, 'ai.scan', {
       entity: 'attachment', entityId: saved[0]?.id || null, ledgerId,
       detail: `${result.engine} 识别 ${items.length} 笔`,
+    });
+    // P15 识别原文落库：截图路径的原文=文字附言（截图本体已在 attachments，ai_json 只存模型输出）
+    aiInputs.record({
+      ledgerId, userId: req.session.userId, source: 'scan',
+      engine: result.engine, model: result.model || null,
+      inputText: text, imageCount: images.length, itemCount: items.length,
+      attachmentId: saved[0]?.id || null,
     });
 
     res.json({
@@ -211,6 +219,12 @@ router.post('/api/ai/text', auth.requireLogin, async (req, res) => {
       }))),
       family: ai.familyMembers(ledgerId),
     });
+    // P15 识别原文落库：纯文本记账分支（查询分支走 ai-ask，不在本表口径内）
+    aiInputs.record({
+      ledgerId, userId: req.session.userId, source: 'text',
+      engine: result.engine, model: result.model || null,
+      inputText: text, imageCount: 0, itemCount: result.items.length,
+    });
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
   }
@@ -301,6 +315,14 @@ router.post('/api/ai/chat', auth.requireLogin, async (req, res) => {
 
     // 附件关联：数量一致时一一对应，否则挂到第一笔
     const linked = att.linkImagesToTxns({ ledgerId, imageIds: saved.map((s) => s.id), txnIds: created });
+
+    // P15 识别原文落库：悬浮球自动入库——后悔药撤销后按 first_txn_id 回溯「当时说了什么」
+    aiInputs.record({
+      ledgerId, userId: req.session.userId, source: 'chat',
+      engine: result.engine, model: result.model || null,
+      inputText: text, imageCount: images.length, itemCount: items.length,
+      attachmentId: saved[0]?.id || null, firstTxnId: created[0] || null,
+    });
 
     auth.audit(req, 'ai.chat', {
       ledgerId, entity: 'transaction', entityId: created[0] || null,

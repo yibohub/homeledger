@@ -26,6 +26,7 @@ const SUITES = [
   'verify-transactions.js',
   'verify-importers.js',
   'verify-ai-ask.js',
+  'verify-ai-inputs.js',
   'verify-minimal.js',
 ];
 
