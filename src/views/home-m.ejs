@@ -28,7 +28,7 @@
       </div>
       <% if (b.forecast && b.forecast.enough) { %>
       <div class="tiny" style="margin-top:4px<%= b.forecast.will_over ? ';color:var(--expense)' : '' %>">
-        预计月末 <%= helpers.fmtAmount(b.forecast.forecast_cents) %><% if (b.forecast.will_over) { %>，将超出 <%= helpers.fmtAmount(b.forecast.over_cents) %><% } %>
+        预计月末 <%= helpers.fmtAmount(b.forecast.forecast_cents) %><% if (b.forecast.will_over) { %>，将超出 <%= helpers.fmtAmount(b.forecast.over_cents) %><% } %><% if (b.forecast.lumpy_count > 0) { %>（已剔大额 <%= b.forecast.lumpy_count %> 笔）<% } %>
       </div>
       <% } %>
       <% if (budgets.length > 1) { %>

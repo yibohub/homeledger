@@ -445,6 +445,23 @@
     card.appendChild(dl);
     card.appendChild(ownerRow);
 
+    // 一次性大额（P7 修订，可勾）：服务端按本月大额线统计预勾，事实级信号——预测节奏外推必剔
+    const lumpyWrap = document.createElement('label');
+    lumpyWrap.className = 'm-draft-sub';
+    lumpyWrap.style.display = 'flex';
+    lumpyWrap.style.alignItems = 'center';
+    lumpyWrap.style.gap = '6px';
+    const lumpyIn = document.createElement('input');
+    lumpyIn.type = 'checkbox';
+    lumpyIn.className = 'm-lumpy';
+    lumpyIn.checked = !!it.no_rhythm_suggested;
+    if (income) lumpyIn.disabled = true; // 收入无节奏外推口径，勾选无意义
+    lumpyWrap.appendChild(lumpyIn);
+    lumpyWrap.appendChild(document.createTextNode(
+      '一次性大额（不计入月末预测节奏）' + (it.no_rhythm_suggested ? '（按统计预勾）' : '')
+    ));
+    card.appendChild(lumpyWrap);
+
     const ops = document.createElement('div');
     ops.className = 'm-draft-ops';
     const ok = document.createElement('button');
@@ -474,6 +491,7 @@
         item.merchant = merchIn.value.trim();
         item.note = noteIn.value.trim();
         item.owner_label = ownerIn.value.trim() || null;
+        item.no_rhythm = lumpyIn.checked ? 1 : 0;
         const res = await fetch('/api/ai/confirm', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf, Accept: 'application/json' },

@@ -54,7 +54,7 @@
 
 <% if (monthForecast && monthForecast.enough) { %>
 <div class="notice small mb16">
-  📊 月末预测：按本月日常节奏<% if (monthForecast.known_future_cents > 0) { %>（含待扣订阅/周期账单 <%= helpers.fmtAmount(monthForecast.known_future_cents) %>）<% } %>，预计全月支出约 <b><%= helpers.fmtAmount(monthForecast.forecast_cents) %></b>——已发生 <%= helpers.fmtAmount(monthForecast.spent_cents) %>，剩余 <%= monthForecast.remaining %> 天估算
+  📊 月末预测：按本月日常节奏<% if (monthForecast.known_future_cents > 0) { %>（含待扣订阅/周期账单 <%= helpers.fmtAmount(monthForecast.known_future_cents) %>）<% } %><% if (monthForecast.lumpy_count > 0) { %>（已剔一次性大额 <%= monthForecast.lumpy_count %> 笔 <%= helpers.fmtAmount(monthForecast.lumpy_cents) %>，不外推）<% } %>，预计全月支出约 <b><%= helpers.fmtAmount(monthForecast.forecast_cents) %></b>——已发生 <%= helpers.fmtAmount(monthForecast.spent_cents) %>，剩余 <%= monthForecast.remaining %> 天估算
 </div>
 <% } %>
 

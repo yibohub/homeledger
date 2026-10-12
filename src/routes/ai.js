@@ -10,6 +10,24 @@ const fd = require('../lib/formdata');
 const att = require('../lib/attachments');
 
 const router = express.Router();
+const fc = require('../lib/forecast');
+
+/**
+ * 草稿卡「一次性大额」预勾建议（P7 修订人工标记层）：
+ * 服务端用与月末预测同一套统计（本月大额线）算出，模型提示词不新增判断职责（AI 不做算术）。
+ * 仅支出口径草稿给建议；建议只是预勾默认值，用户可勾可取消，落库以用户确认为准。
+ */
+function withLumpyHint(ledgerId, items) {
+  const now = new Date();
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const { threshold_cents } = fc.lumpyOfMonth(ledgerId, month);
+  return items.map((it) => ({
+    ...it,
+    no_rhythm_suggested:
+      it.type !== 'income' && it.type !== 'transfer' && Number(it.amount_cents) >= threshold_cents ? 1 : 0,
+    no_rhythm_threshold: threshold_cents,
+  }));
+}
 
 /* --------------------------------- 页面 ---------------------------------- */
 
@@ -52,12 +70,12 @@ router.post('/api/ai/scan', auth.requireLogin, auth.requireLedgerWrite, async (r
 
     const categories = fd.flatCategories(ledgerId);
     const accounts = fd.accounts(ledgerId);
-    const items = result.items.map((it) => ({
+    const items = withLumpyHint(ledgerId, result.items.map((it) => ({
       ...it,
       category_path: categories.find((c) => Number(c.id) === Number(it.category_id))?.path || (it.category_name || '未分类'),
       account_name_resolved: accounts.find((a) => Number(a.id) === Number(it.account_id))?.name || '',
       kind: it.type === 'income' ? 'income' : 'expense',
-    }));
+    })));
 
     auth.audit(req, 'ai.scan', {
       entity: 'attachment', entityId: saved[0]?.id || null, ledgerId,
@@ -105,6 +123,8 @@ router.post('/api/ai/confirm', auth.requireLogin, auth.requireLedgerWrite, (req,
         tags: it.tags || '',
         is_reimbursable: it.is_reimbursable ? 1 : 0,
         owner_label: it.owner_label || null,
+        // P7 修订：草稿卡「一次性大额」勾选落库（0=不标记，预测仍按统计口径自动判）
+        no_rhythm: it.no_rhythm ? 1 : 0,
         source: req.body.source || 'ai_screenshot',
         ai_json: JSON.stringify(it.raw || rest).slice(0, 4000),
       });
@@ -183,12 +203,12 @@ router.post('/api/ai/text', auth.requireLogin, async (req, res) => {
       ok: true,
       engine: result.engine,
       warnings: result.warnings || [],
-      items: result.items.map((it) => ({
+      items: withLumpyHint(ledgerId, result.items.map((it) => ({
         ...it,
         category_path: categories.find((c) => Number(c.id) === Number(it.category_id))?.path || (it.category_name || '未分类'),
         // 草稿卡要显示「推荐了哪个账户」；习惯推荐的账户在此按 id 解析出名字
         account_name_resolved: accounts.find((a) => Number(a.id) === Number(it.account_id))?.name || '',
-      })),
+      }))),
       family: ai.familyMembers(ledgerId),
     });
   } catch (e) {

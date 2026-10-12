@@ -495,6 +495,10 @@
             '<div class="field" style="flex:2"><label>备注</label><input type="text" class="d-note" value="' + esc(it.note || '') + '"></div>' +
             '<div class="field"><label>归属人' + (it.owner_recommended ? ' <span class="ai-hint">按习惯推荐</span>' : '') + '</label><input type="text" class="d-owner" list="ai-owner-list-' + i + '" value="' + esc(it.owner_label || '') + '" placeholder="为谁花，可留空"></div>' +
           '</div>' +
+          '<div class="row tiny" style="margin-top:8px;align-items:center;gap:8px">' +
+            '<label class="check"><input type="checkbox" class="d-lumpy"' + (it.no_rhythm_suggested ? ' checked' : '') + (it.type === 'expense' ? '' : ' disabled') + '> 一次性大额（不计入月末预测节奏）</label>' +
+            (it.no_rhythm_suggested ? '<span class="ai-hint">按统计预勾（本月大额线 ¥' + ((it.no_rhythm_threshold || 0) / 100).toFixed(2) + '）</span>' : '') +
+          '</div>' +
           '<datalist id="ai-owner-list-' + i + '">' + (window.__AI_FAMILY__ || []).concat(it.owner_label ? [it.owner_label] : []).filter(function(v, i, a) { return v && a.indexOf(v) === i; }).map(function(n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist>',
         '</div>';
       });
@@ -550,6 +554,7 @@
             merchant: $('.d-merchant', card).value.trim(),
             note: $('.d-note', card).value.trim(),
             owner_label: ($('.d-owner', card).value || '').trim() || null,
+            no_rhythm: $('.d-lumpy', card) && $('.d-lumpy', card).checked ? 1 : 0,
             // P12：识别时的推荐快照（编辑前的原值），服务端据此记习惯负反馈
             rec_snapshot: { category_id: d.category_id, account_id: d.account_id, owner_label: d.owner_label || null, type: d.type },
           };

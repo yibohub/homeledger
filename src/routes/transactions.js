@@ -33,6 +33,8 @@ function readForm(body) {
     note: body.note || '',
     merchant: body.merchant || '',
     owner_label: body.owner_label || null,
+    // P7 修订：一次性大额人工标记（预测节奏外推必剔；未勾选=0 由统计层自动判）
+    no_rhythm: body.no_rhythm ? 1 : 0,
     status: body.status || 'cleared',
     is_reimbursable: body.is_reimbursable ? 1 : 0,
     tags: body.tags || '',

@@ -188,8 +188,8 @@ function createTransaction(ledgerId, userId, d) {
   const info = run(
     `INSERT INTO transactions
      (ledger_id, type, amount_cents, currency, rate, amount_base_cents, account_id, to_account_id, category_id,
-      user_id, txn_date, note, merchant, status, is_reimbursable, group_id, source, ai_json, owner_label, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      user_id, txn_date, note, merchant, status, is_reimbursable, group_id, source, ai_json, owner_label, no_rhythm, created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ledgerId, type, amount, currency, rate, toBase(amount, rate), accountId, toAccountId,
     pickCategory(ledgerId, d.category_id), userId, txnDate,
     d.note ? String(d.note).slice(0, 300) : null,
@@ -200,6 +200,7 @@ function createTransaction(ledgerId, userId, d) {
     d.source || 'manual',
     d.ai_json || null,
     cleanOwner(d.owner_label),
+    d.no_rhythm ? 1 : 0,
     nowStr(), nowStr()
   );
   const id = info.lastInsertRowid;
@@ -233,7 +234,7 @@ function updateTransaction(id, ledgerId, userId, d) {
   run(
     `UPDATE transactions SET type=?, amount_cents=?, currency=?, rate=?, amount_base_cents=?, account_id=?,
        to_account_id=?, category_id=?, txn_date=?, note=?, merchant=?, status=?, is_reimbursable=?,
-       owner_label=?, updated_at=? WHERE id=?`,
+       owner_label=?, no_rhythm=?, updated_at=? WHERE id=?`,
     type, amount, d.currency || old.currency, rate, toBase(amount, rate),
     accountId, toAccountId,
     pickCategory(ledgerId, d.category_id),
@@ -243,6 +244,8 @@ function updateTransaction(id, ledgerId, userId, d) {
     d.status === 'pending' ? 'pending' : 'cleared',
     d.is_reimbursable ? 1 : 0,
     cleanOwner(d.owner_label),
+    // 未提供时保全原值（openapi 局部更新路径不传该字段，不能把已标记的大额冲掉）
+    d.no_rhythm === undefined ? (Number(old.no_rhythm) === 1 ? 1 : 0) : (d.no_rhythm ? 1 : 0),
     nowStr(), id
   );
   applyTags(id, ledgerId, d.tags, true);
