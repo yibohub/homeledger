@@ -499,7 +499,7 @@
           // 未渲染 = 不标记，统计层照常自动判（收集处已空值守卫）
           (it.no_rhythm_suggested
             ? '<div class="row tiny" style="margin-top:8px;align-items:center;gap:8px">' +
-              '<label class="check"><input type="checkbox" class="d-lumpy" checked' + (it.type === 'expense' ? '' : ' disabled') + '> 一次性大额（不计入月末预测节奏）</label>' +
+              '<label class="check"><input type="checkbox" class="d-lumpy" checked' + (it.type === 'expense' ? '' : ' disabled') + '> 一次性大额</label>' +
               '<span class="ai-hint">按统计预勾（本月大额线 ¥' + ((it.no_rhythm_threshold || 0) / 100).toFixed(2) + '）</span>' +
             '</div>'
             : '') +
