@@ -1460,6 +1460,7 @@ body.kb-open .m-tabbar { display: none; }
 .m-draft { border: 1px solid var(--border); border-radius: 11px; padding: 10px 11px; margin-top: 10px; background: var(--card-2); }
 .m-draft.done { border-color: var(--income); }
 .m-draft-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.m-draft-count { font-size: 10px; color: var(--primary); border: 1px solid currentColor; border-radius: 8px; padding: 0 5px; white-space: nowrap; }
 .m-draft-head .amt { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .m-draft-head .amt.income { color: var(--income); }
 .m-draft-head .amt.expense { color: var(--expense); }

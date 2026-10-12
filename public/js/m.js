@@ -320,7 +320,7 @@
     row.appendChild(inputEl);
     return row;
   }
-  function draftCard(it) {
+  function draftCard(it, idx, total) {
     const income = it.type === 'income';
     const card = document.createElement('div');
     card.className = 'm-draft';
@@ -332,6 +332,14 @@
     amt.className = 'amt ' + (income ? 'income' : 'expense');
     amt.textContent = (income ? '+' : '−') + fmt(it.amount_cents);
     head.appendChild(title);
+    // 多笔识别时标序号/总数（数字标签嵌在头行，不占独立行；单笔不显示）
+    if (total > 1) {
+      const cnt = document.createElement('span');
+      cnt.className = 'm-draft-count';
+      cnt.textContent = (idx + 1) + '/' + total;
+      cnt.title = '共 ' + total + ' 笔草稿，逐张确认';
+      head.insertBefore(cnt, amt);
+    }
     head.appendChild(amt);
     card.appendChild(head);
 
@@ -564,7 +572,7 @@
     // 旧 insertBefore 循环会把最后一条顶到最上、与原文反序）
     const frag = document.createDocumentFragment();
     data.items.forEach((it, idx) => {
-      const card = draftCard(it);
+      const card = draftCard(it, idx, data.items.length);
       card._imageIds = data.items.length === (imageIds || []).length ? [imageIds[idx]].filter(Boolean) : (idx === 0 ? (imageIds || []).slice(0, 1) : []);
       frag.appendChild(card);
     });
