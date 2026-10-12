@@ -68,7 +68,7 @@
               <span class="amount income">预算内</span>
             <% } %>
           </span>
-          <span class="muted">按本月日常节奏+已知扣费估算</span>
+          <span class="muted">按本月日常节奏+已知扣费估算<% if (b.forecast.lumpy_count > 0) { %>，已剔一次性大额 <%= b.forecast.lumpy_count %> 笔<% } %></span>
         </div>
         <% } %>
 

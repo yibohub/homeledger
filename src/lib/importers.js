@@ -85,7 +85,7 @@ const SKIP_STATUS = /已关闭|交易关闭|已退款|全额退款|退款成功|
 /** 导出 CSV type_key 列的合法值 */
 const TXN_KEYS = new Set(['expense','income','transfer','lend','borrow','repay_receive','repay_pay','reimburse','refund','fee','interest','invest_buy','invest_sell','adjust']);
 
-function normalizeRow({ date, direction, amountText, merchant, desc, categoryText, accountText, toAccountText, status, orderNo, typeKey, ownerText }) {
+function normalizeRow({ date, direction, amountText, merchant, desc, categoryText, accountText, toAccountText, status, orderNo, typeKey, ownerText, noRhythmText }) {
   const amountCents = parseAmountToCents(amountText);
   const dir = String(direction || '').trim();
   const key = String(typeKey || '').trim();
@@ -120,6 +120,8 @@ function normalizeRow({ date, direction, amountText, merchant, desc, categoryTex
     to_account_hint: toAccountText || null,
     // 归属人（P11）：自家导出的「归属人」列回读；微信/支付宝原生账单无此列，恒空
     owner_label: cleanOwnerLabel(ownerText),
+    // 一次性大额（P7 修订）：自家导出的「一次性大额」列回读（1/是），外部账单无此列恒 0
+    no_rhythm: /^(1|是|y|yes)$/i.test(String(noRhythmText || '').trim()) ? 1 : 0,
     order_no: orderNo || null,
   };
 }
@@ -151,6 +153,7 @@ function parseBill(buffer) {
   const iAmount = headerIndex(header, ['金额(元)', '金额', 'amount']);
   const iMerchant = headerIndex(header, ['交易对方', '对方', 'merchant', '商家']);
   const iOwner = headerIndex(header, ['归属人', 'owner']);
+  const iNoRhythm = headerIndex(header, ['一次性大额', 'no_rhythm']);
   const iDesc = headerIndex(header, ['商品说明', '商品', '备注', '描述', '说明', 'note', 'detail']);
   const iCategory = headerIndex(header, ['交易分类', '分类', 'category']);
   const iAccount = headerIndex(header, ['收/付款方式', '支付方式', '付款方式', '账户', 'account']);
@@ -178,6 +181,7 @@ function parseBill(buffer) {
       orderNo: iOrder >= 0 ? r[iOrder] : '',
       typeKey: iTypeKey >= 0 ? r[iTypeKey] : '',
       ownerText: iOwner >= 0 ? r[iOwner] : '',
+      noRhythmText: iNoRhythm >= 0 ? r[iNoRhythm] : '',
     });
     if (norm.skip || !norm.amount_cents) { skipped++; continue; }
     if (norm.neutral) neutralRecords.push(norm);
@@ -280,12 +284,13 @@ function importRecords({
         run(
           `INSERT INTO transactions
            (ledger_id, type, amount_cents, currency, rate, amount_base_cents, account_id, to_account_id, category_id,
-            user_id, txn_date, note, merchant, status, source, ai_json, owner_label, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            user_id, txn_date, note, merchant, status, source, ai_json, owner_label, no_rhythm, created_at, updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           ledgerId, rec.type, signedAmount, 'CNY', 1, signedAmount,
           accountId, toAccountId, categoryId, userId, rec.txn_date, rec.note, rec.merchant,
           'cleared', 'import', JSON.stringify({ source, order_no: rec.order_no, neutral: !!rec.neutral }),
           rec.owner_label || null,
+          rec.no_rhythm ? 1 : 0,
           nowStr(), nowStr()
         );
         dupSet.add(fp);
@@ -324,14 +329,16 @@ function toCsv(header, rows) {
   return '\uFEFF' + lines.join('\r\n') + '\r\n';
 }
 
-// 第二列「类型」是人读中文 label，第十六列 type_key 是机读枚举（回导时优先用它精确还原类型）
-const EXPORT_HEADER = ['日期', '类型', '金额', '币种', '折算金额', '分类', '账户', '转入账户', '成员', '归属人', '商家', '备注', '标签', '来源', '状态', '备注2', 'type_key'];
+// 第二列「类型」是人读中文 label，type_key 是机读枚举（回导时优先用它精确还原类型）；
+// 「一次性大额」是 P7 修订的人工标记（1/空），回读后预测节奏外推必剔
+const EXPORT_HEADER = ['日期', '类型', '金额', '币种', '折算金额', '分类', '账户', '转入账户', '成员', '归属人', '一次性大额', '商家', '备注', '标签', '来源', '状态', '备注2', 'type_key'];
 
 function exportRows(ledgerId, rows) {
   return rows.map((t) => [
     t.txn_date, t.type_label || t.type, (t.amount_cents / 100).toFixed(2), t.currency,
     (t.amount_base_cents / 100).toFixed(2), t.category_path || '', t.account_name || '',
-    t.to_account_name || '', t.member_name || '', t.owner_label || '', t.merchant || '', t.note || '',
+    t.to_account_name || '', t.member_name || '', t.owner_label || '',
+    Number(t.no_rhythm) === 1 ? '1' : '', t.merchant || '', t.note || '',
     t.tag_names || '', t.source, t.status, '', t.type,
   ]);
 }

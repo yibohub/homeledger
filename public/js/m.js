@@ -445,6 +445,24 @@
     card.appendChild(dl);
     card.appendChild(ownerRow);
 
+    // 一次性大额（P7 修订，可勾）：服务端按本月大额线统计预勾，事实级信号——预测节奏外推必剔
+    const lumpyWrap = document.createElement('label');
+    lumpyWrap.className = 'm-draft-sub';
+    lumpyWrap.style.display = 'flex';
+    lumpyWrap.style.alignItems = 'center';
+    lumpyWrap.style.gap = '6px';
+    const lumpyIn = document.createElement('input');
+    lumpyIn.type = 'checkbox';
+    lumpyIn.className = 'm-lumpy';
+    lumpyIn.checked = !!it.no_rhythm_suggested;
+    if (income || it.type === 'transfer') lumpyIn.disabled = true; // 收入/转账无节奏外推口径，勾选无意义
+    lumpyIn.addEventListener('change', () => { it.__lumpyTouched = true; }); // 用户改过勾选，确认时不再按金额重算
+    lumpyWrap.appendChild(lumpyIn);
+    lumpyWrap.appendChild(document.createTextNode(
+      '一次性大额（不计入月末预测节奏）' + (it.no_rhythm_suggested ? '（按统计预勾）' : '')
+    ));
+    card.appendChild(lumpyWrap);
+
     const ops = document.createElement('div');
     ops.className = 'm-draft-ops';
     const ok = document.createElement('button');
@@ -474,6 +492,11 @@
         item.merchant = merchIn.value.trim();
         item.note = noteIn.value.trim();
         item.owner_label = ownerIn.value.trim() || null;
+        // 预勾与确认前改金额脱钩：没手动改过勾选时按当前金额重算（¥6000 改 ¥30 不该带着标记入库）
+        if (!it.__lumpyTouched && !income && it.type !== 'transfer' && it.no_rhythm_threshold) {
+          lumpyIn.checked = item.amount_cents >= it.no_rhythm_threshold;
+        }
+        item.no_rhythm = lumpyIn.checked ? 1 : 0;
         const res = await fetch('/api/ai/confirm', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf, Accept: 'application/json' },

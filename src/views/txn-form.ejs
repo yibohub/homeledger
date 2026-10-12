@@ -129,6 +129,8 @@
 
         <div class="row wrap mb12" style="gap:16px">
           <label class="check"><input type="checkbox" name="is_reimbursable" value="1" <%= t.is_reimbursable ? 'checked' : '' %>> 这笔可以报销</label>
+          <% // P7 修订：一次性大额——事实级信号，月末预测的节奏外推必剔（统计层对未勾选的照常自动判） %>
+          <label class="check"><input type="checkbox" name="no_rhythm" value="1" <%= t.no_rhythm ? 'checked' : '' %>> 一次性大额（不计入月末预测节奏）</label>
         </div>
 
         <details style="margin-top:4px">
