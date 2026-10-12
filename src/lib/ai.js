@@ -973,6 +973,11 @@ function normalizeItem(raw, ledgerId, { sourceText = '', noteLines = null } = {}
  */
 const SENSITIVE_LOCAL_RE = /(工资|薪资|薪水|月薪|发薪|代发|奖金|年终奖|十三薪|年薪|绩效|稿费|外快|兼职|养老金|退休金|压岁钱|奖学金|劳务费|分红|股息|结息|存款利息|房租收|收租|理赔|赔付|公积金提取|报销款|报销到账)/i;
 
+/** 敏感本地分流词表命中（收入类口语）：查账残余句意图解析出网前必须过同一道闸 */
+function isSensitiveLocalText(text) {
+  return !!text && SENSITIVE_LOCAL_RE.test(String(text));
+}
+
 async function analyzeBill({ images = [], text = '', ledgerId }) {
   const cfg = getAiConfig();
   const ctx = buildContext(ledgerId);
@@ -1139,5 +1144,6 @@ module.exports = {
   familyMembers, habitOwnerId, cleanOwnerLabel, recordDraftFeedback,
   enrichImportCategories,
   extractAmount, cleanMerchant, callModel, listModels, guessVision, extractJson,
+  isSensitiveLocalText,
   isHeaderSafe, isMaskedSecret, sanitizeSecret,
 };

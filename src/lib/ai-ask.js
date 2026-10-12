@@ -272,6 +272,7 @@ function parseRangeByRules(text, today) {
     return n ? { kind: 'days', days: n } : null;
   });
   push(/(?:近|最近|过去)\s*半\s*年/, () => ({ kind: 'months', months: 6 }));
+  push(/(?:近|最近|过去)\s*半\s*个?月/, () => ({ kind: 'days', days: 15 }));
   push(/(?:近|最近|过去)\s*[一1]\s*年/, () => ({ kind: 'months', months: 12 }));
   push(/(?:近|最近|过去)\s*(\d{1,2}|[一两二三四五六七八九十]+)\s*(?:周|礼拜)/, (m) => {
     const n = parseCnNumber(m[1]);
@@ -813,20 +814,38 @@ function narrateTemplate(data) {
 const CLARIFY_TEXT =
   '这句话我拿不准是想记账还是想查账。记一笔试试「午饭 35 元」；查账试试「这个月餐饮花了多少」「餐饮预算还剩多少」「这个月比上个月多花多少」。';
 
+/** 闲聊纠正（维护者定案 2026-10-12：项目不支持闲聊，AI 判 other 时明确方向） */
+const CLARIFY_SCOPE_TEXT =
+  '这里只做记账和查账。记一笔试试「午饭 35 元」；查账试试「这个月花了多少」「最近三天打车花了多少」。';
+
+/** 裸「最近/近期」反问闸（维护者定案 2026-10-12）：只认字面，宽窄交给 ruleRangeExplicit——
+ *  规则层解析得出的显式区间（最近三天/三个月/半个月…）本来就能赢闸，解析不出的形态
+ *  （最近三年/一百天/1000天）一律反问，不猜窗口。审查 P2-1：负向断言曾宽于规则层
+ *  覆盖面，「最近半个月」漏放成静默答本月——恰是本闸要消灭的错窗口类 */
+const BARE_RECENT_RE = /(?:最近|近期)/;
+const CLARIFY_BARE_RECENT =
+  '「最近」想看多长的时间范围？试试「最近三天」「最近三个月」，或直接说「本周」「本月」。';
+
 /**
  * 悬浮球文本查询管线。
  * 返回 null = 不是查询（调用方继续走记账管线）；否则返回 {mode, engine, text, data, warnings}。
  *  - mode 'answer'：已出数并叙述
- *  - mode 'clarify'：像查询但解析不出，反问引导
+ *  - mode 'clarify'：像查询但解析不出 / 裸「最近」/ 未来时段 / AI 判闲聊，反问引导
  */
 async function handleAssistantText({ text, ledgerId, today = todayStr() }) {
   const q = String(text || '').trim();
-  if (!q || !looksLikeQuery(q)) return null;
+  if (!q) return null;
+
+  if (!looksLikeQuery(q)) {
+    if (isExplicitRecord(q)) return null; // 句尾带金额优先记账（无 Key 降级的主要误伤面，不引进模型）
+    return resolveResidualIntent(q, ledgerId, today); // 残余句：AI 判意图；无 Key 原样交记账管线
+  }
 
   const cfg = ai.getAiConfig();
   const ctx = buildQueryContext(ledgerId);
   let parsed = matchQueryByRules(q, ctx, today);
   let usedModel = false;
+  const ruleRangeExplicit = !!(parsed && parsed.query.range && !parsed.query.range_from_default);
 
   if (ai.isAiUsable()) {
     try {
@@ -852,8 +871,61 @@ async function handleAssistantText({ text, ledgerId, today = todayStr() }) {
     return { mode: 'clarify', engine: 'rule', text: CLARIFY_TEXT + hint, data: null, warnings: [] };
   }
   if (/扣了没|扣没扣|扣了吗|到账没/.test(q)) parsed.query.confirm = true;
+  return finishAnswer(q, parsed, { ledgerId, today, usedModel, ctx, cfg, ruleRangeExplicit });
+}
 
+/**
+ * 预筛残余句（无查询信号词、无句尾金额，如「三天前买了啥」「你好」）：
+ * 有 Key 时补一次模型意图解析——query 回查账管线（「N天前」等区间仍由规则层先算好、
+ * 合并时优先于模型），other（闲聊/无关）明确纠正项目方向，record/低置信/解析失败
+ * 原样交回记账管线（行为与旧版一致）。无 Key 完全不进此分支，零成本预筛性质保留。
+ * 敏感闸：同款收入类词表命中一律不出网交本地记账（宁严勿漏，不受 sensitive_local_only
+ * 开关控——开关只控记账路径；主查询分支带信号词的句子目前无此闸，既有口径登记 BOARD）。
+ * 带货币语境金额（¥/元/块，如「还房贷 5000 元 本金加利息」）→ 记账意图概率极高，
+ * 不花意图调用直进记账；裸数字（「3天前」「10月8号」）不算金额语境，照进意图分支。
+ */
+const CURRENCY_CONTEXT_RE = /(¥|￥)|\d(?:\.\d+)?\s*(?:元|块钱|块|圆)/;
+
+async function resolveResidualIntent(q, ledgerId, today) {
+  if (!ai.isAiUsable()) return null;
+  if (ai.isSensitiveLocalText(q)) return null;
+  if (CURRENCY_CONTEXT_RE.test(q)) return null;
+  const cfg = ai.getAiConfig();
+  const ctx = buildQueryContext(ledgerId);
+  try {
+    const mp = await parseQueryByModel(q, ctx, today, cfg);
+    const confOk = mp && (mp.confidence === undefined || Number(mp.confidence) >= 0.5);
+    if (mp && confOk && mp.intent === 'other') {
+      return { mode: 'clarify', engine: 'llm', text: CLARIFY_SCOPE_TEXT, data: null, warnings: [] };
+    }
+    if (mp && confOk && mp.intent === 'query' && mp.query) {
+      const nq = normalizeModelQuery(mp.query, ctx, ledgerId, today);
+      if (nq) {
+        // 日期靠代码：模型只给意图类型，区间仍由规则层从原文算（算不出交模型值/缺省）
+        const ruleRange = parseRangeByRules(q, today);
+        return finishAnswer(q, { query: mergeRuleParams({ range: ruleRange }, nq) }, { ledgerId, today, usedModel: true, ctx, cfg, ruleRangeExplicit: !!ruleRange });
+      }
+    }
+  } catch {
+    // 模型失败 → 原样交记账管线
+  }
+  return null;
+}
+
+/** 出数 + 叙述 + 两道反问闸（裸「最近」/ 未来时段）。查询分支与残余句分支共用 */
+async function finishAnswer(q, parsed, { ledgerId, today, usedModel, cfg, ruleRangeExplicit }) {
+  // 裸「最近/近期」不猜窗口（维护者定案）：规则没显式解析出范围时反问，模型猜的也不采纳
+  if (!ruleRangeExplicit && BARE_RECENT_RE.test(q)) {
+    return { mode: 'clarify', engine: 'rule', text: CLARIFY_BARE_RECENT, data: null, warnings: [] };
+  }
   const range = resolveRange(parsed.query.range, today);
+  // 未来时段无账可查（「今年10月8号」/ 1月问「第3季度」）：反问而非答 ¥0
+  if (range.start > today) {
+    return {
+      mode: 'clarify', engine: 'rule', data: null, warnings: [],
+      text: `「${range.label}」还没到，查不到未来的账。想看过去的时段，换个日期试试。`,
+    };
+  }
   const data = runQuery(ledgerId, parsed.query, range, today);
   let answer = narrateTemplate(data);
   const warnings = [];
@@ -873,5 +945,5 @@ async function handleAssistantText({ text, ledgerId, today = todayStr() }) {
 module.exports = {
   looksLikeQuery, isExplicitRecord, buildQueryContext, matchQueryByRules, parseRangeByRules,
   resolveRange, normalizeModelQuery, mergeRuleParams, runQuery, narrateTemplate, narrationCovers, keyAmountsOf,
-  handleAssistantText, QUERY_HINT_RE, CLARIFY_TEXT,
+  handleAssistantText, QUERY_HINT_RE, CLARIFY_TEXT, BARE_RECENT_RE, CLARIFY_SCOPE_TEXT, CLARIFY_BARE_RECENT,
 };

@@ -12,6 +12,7 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
+const http = require('node:http');
 
 const ASK_DATA_DIR = path.join(__dirname, '..', 'data-verify-ask');
 // 8099 实例的数据目录：run-all 会把服务端 DATA_DIR 传进环境，必须在下面覆盖前捕获
@@ -428,6 +429,30 @@ async function req(method, p, { form, json, headers = {}, noCookie = false } = {
 const noComma = (s) => String(s).replace(/,/g, '');
 
 (async () => {
+  console.log('\n=== A2c. 裸「最近」反问 + 未来时段反问 + 残余句无 Key 原样（维护者定案 2026-10-12）===\n');
+  let a2c = await aiAsk.handleAssistantText({ text: '最近花了多少', ledgerId, today });
+  check('裸「最近花了多少」→ 反问时间范围（不猜窗口）', a2c.mode === 'clarify' && a2c.text.includes('时间范围'), a2c.text);
+  a2c = await aiAsk.handleAssistantText({ text: '近期支出趋势', ledgerId, today });
+  check('「近期支出趋势」同样反问', a2c.mode === 'clarify' && a2c.text.includes('时间范围'), a2c.text);
+  a2c = await aiAsk.handleAssistantText({ text: '最近三天花了多少', ledgerId, today });
+  check('「最近三天」显式解析不被反问', a2c.mode === 'answer', a2c.text);
+  a2c = await aiAsk.handleAssistantText({ text: '这个月花了多少', ledgerId, today });
+  check('「这个月花了多少」不受裸最近影响', a2c.mode === 'answer', a2c.text);
+  a2c = await aiAsk.handleAssistantText({ text: '2027年12月25号花了多少', ledgerId, today: '2026-10-12' });
+  check('未来单日 → 反问「还没到」（不答 ¥0）', a2c.mode === 'clarify' && a2c.text.includes('还没到'), a2c.text);
+  a2c = await aiAsk.handleAssistantText({ text: '2026年6月1日花了多少', ledgerId, today: '2026-10-12' });
+  check('过去日期不受未来反问影响', a2c.mode === 'answer', a2c.text);
+  a2c = await aiAsk.handleAssistantText({ text: '最近半个月花了多少', ledgerId, today });
+  check('「最近半个月」→ 最近 15 天（半月已入规则表，审查 P2-1 增强不反问）', a2c.mode === 'answer' && a2c.data && a2c.data.label === '最近 15 天', a2c.text);
+  a2c = await aiAsk.handleAssistantText({ text: '最近三年花了多少', ledgerId, today });
+  check('「最近三年」（规则接不住）→ 反问而非静默答本月（审查 P2-1 锁）', a2c.mode === 'clarify' && a2c.text.includes('时间范围'), a2c.text);
+  a2c = await aiAsk.handleAssistantText({ text: '附近有几笔支出', ledgerId, today });
+  check('「附近」不含裸最近字面不误反问', a2c.mode === 'answer', a2c.text);
+  a2c = await aiAsk.handleAssistantText({ text: '三天前买了啥', ledgerId, today });
+  check('残余句无 Key → null 原样交记账（行为不变）', a2c === null);
+  a2c = await aiAsk.handleAssistantText({ text: '你好', ledgerId, today });
+  check('闲聊无 Key → null 原样交记账', a2c === null);
+
   console.log('\n=== B. 记账/查账隐式分流 + 五类问法（HTTP 端到端 8099，规则引擎）===\n');
   let up = true;
   try { await fetch(BASE + '/login'); } catch { up = false; }
@@ -548,6 +573,42 @@ const noComma = (s) => String(s).replace(/,/g, '');
   } else {
     check('（跳过只读成员矩阵：8099 实例库不可达）', true);
   }
+
+  /* --- B2. 残余句 AI 意图（mock 模型）：query 回查账且规则区间优先 / other 纠正方向 / 关 Key 回原样 --- */
+  console.log('\n=== B2. 残余句 AI 意图（mock 模型）===\n');
+  const mock = http.createServer((mq, mr) => {
+    let body = '';
+    mq.on('data', (c) => { body += c; });
+    mq.on('end', () => {
+      let content;
+      if (body.includes('统计结果')) {
+        // 叙述调用（narrate 提示词特征）返回规范空数据叙述，验证叙述链而非 JSON 糊脸（审查 P3-4）
+        content = '3 天前还没有支出记录。';
+      } else if (body.includes('买了啥')) {
+        // 故意给错误区间 months:99——「N天前」的区间必须由规则层赢（日期靠代码）
+        content = JSON.stringify({ intent: 'query', confidence: 0.9, query: { type: 'category_summary', metric: 'expense', range: { kind: 'months', months: 99 } } });
+      } else {
+        content = JSON.stringify({ intent: 'other', confidence: 0.9 });
+      }
+      mr.writeHead(200, { 'Content-Type': 'application/json' });
+      mr.end(JSON.stringify({ choices: [{ message: { content } }] }));
+    });
+  });
+  await new Promise((res2) => mock.listen(0, '127.0.0.1', res2));
+  r = await req('POST', '/settings/ai', { form: { _csrf: csrf, 'ai.enabled': 'true', 'ai.base_url': `http://127.0.0.1:${mock.address().port}/v1`, 'ai.model': 'mock-ask-intent' } });
+  check('配置 mock 模型', r.status === 302, `HTTP ${r.status}`);
+  r = await req('POST', '/api/ai/chat', { json: { text: '三天前买了啥' } });
+  check('残余句「三天前买了啥」→ AI 判 query 回查账，答「3天前」单日（规则区间赢模型 months:99，叙述走模型文案非 JSON）',
+    r.json.mode === 'answer' && r.json.engine === 'llm' && r.json.data
+    && r.json.data.label.includes('3天前') && !r.json.data.label.includes('个月')
+    && r.json.text.includes('还没有支出记录'), JSON.stringify(r.json.data && r.json.data.label) + ' | ' + r.json.text);
+  r = await req('POST', '/api/ai/chat', { json: { text: '你好呀，在忙啥' } });
+  check('闲聊句 → AI 判 other → 明确纠正项目方向（非记账模式）', r.json.mode === 'clarify' && r.json.text.includes('只做记账和查账'), r.json.text);
+  r = await req('POST', '/settings/ai', { form: { _csrf: csrf, 'ai.enabled': 'false' } });
+  check('关闭 AI 还原', r.status === 302, `HTTP ${r.status}`);
+  r = await req('POST', '/api/ai/chat', { json: { text: '你好呀，在忙啥' } });
+  check('关 Key 后闲聊回原样（记账管线友好返回）', r.json.mode === 'record' && (r.json.items || []).length === 0, `mode=${r.json.mode}`);
+  mock.close();
 
   console.log(`\n结果：${pass} 通过 / ${fail} 失败\n`);
   process.exit(fail ? 1 : 0);
