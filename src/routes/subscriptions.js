@@ -30,12 +30,13 @@ const PRESETS = [
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** 表单 → 订阅字段 */
-function readForm(body, userId) {
+/** 表单 → 订阅字段；fallbackCycleN：编辑时表单已无「每几期」输入（v1.16.0 同步上游简化），
+ *  未携带时沿用原值，防止历史多期订阅（如每 2 月）被编辑动作静默摊平成每期 */
+function readForm(body, userId, fallbackCycleN = null) {
   const name = String(body.name || '').trim();
   const amount = u.parseAmountToCents(body.amount);
   const cycle = subs.cycleOf(body.cycle);
-  const cycleN = Math.max(1, Math.min(12, Number(body.cycle_n) || 1));
+  const cycleN = Math.max(1, Math.min(12, Number(body.cycle_n) || Number(fallbackCycleN) || 1));
   const anchorMonth = body.anchor_month ? Math.max(1, Math.min(12, Number(body.anchor_month))) : null;
   const trialEnds = DAY_RE.test(String(body.trial_ends_on || '')) ? body.trial_ends_on : null;
   const status = ['trial', 'active', 'paused'].includes(body.status) ? body.status : 'active';
@@ -155,7 +156,7 @@ router.post('/subscriptions/:id', auth.requireLogin, auth.requireLedgerWrite, (r
   const id = Number(req.params.id);
   const old = get('SELECT * FROM subscriptions WHERE id = ? AND ledger_id = ?', id, ledgerId);
   if (!old) { res.flash('error', '订阅不存在'); return res.redirect('/subscriptions'); }
-  const d = readForm(req.body, req.session.userId);
+  const d = readForm(req.body, req.session.userId, old.cycle_n);
   if (!d.name || !d.amount_cents) { res.flash('error', '名称与金额不能为空'); return res.redirect(`/subscriptions/${id}/edit`); }
   // 已取消订阅不随表单复活：编辑页状态下拉没有「已取消」选项，保存时沿用原状态
   if (old.status === 'canceled') d.status = 'canceled';

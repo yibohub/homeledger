@@ -956,7 +956,7 @@
         const signCls = t.type === 'adjust' ? 'neutral' : (t.is_income ? 'income' : (t.is_expense ? 'expense' : 'neutral'));
         const sign = t.type === 'adjust' ? '' : (t.is_income ? '+' : (t.is_expense ? '−' : ''));
         const atts = (data.attachments || []).map((a) =>
-          '<figure><img data-zoom src="' + a.url + '" alt="' + esc(a.file_name) + '" loading="lazy"></figure>'
+          '<figure><img data-zoom src="' + esc(a.url) + '" alt="' + esc(a.file_name) + '" loading="lazy"></figure>'
         ).join('');
 
         // 写权限：与列表行的操作按钮同源（只读成员行内没有编辑/删除钮）
@@ -965,7 +965,7 @@
         mask.className = 'modal-mask';
         mask.innerHTML =
           '<div class="modal txn-detail" role="dialog" aria-modal="true">' +
-            '<div class="modal-title">' + (t.category_icon || t.type_icon) + ' ' + esc(t.type === 'transfer' ? '转账' : (t.category_name || t.type_label)) + '</div>' +
+            '<div class="modal-title">' + esc(t.category_icon || t.type_icon) + ' ' + esc(t.type === 'transfer' ? '转账' : (t.category_name || t.type_label)) + '</div>' +
             '<div class="txn-detail-amt amount ' + signCls + '">' + sign + fmtCents(t.amount_cents) + (t.currency !== 'CNY' ? ' <span class="tiny muted">' + esc(t.currency) + '</span>' : '') + '</div>' +
             '<div class="modal-body">' + rows.join('') +
               (atts ? '<div class="txn-detail-att tiny muted">附件（点击放大）</div><div class="gallery txn-detail-gallery">' + atts + '</div>' : '') +
@@ -991,6 +991,7 @@
             if (res.ok) {
               const row = document.querySelector('.txn[data-txn-id="' + t.id + '"]');
               if (row) row.remove();
+              if (refreshBulk) refreshBulk();
               close();
               toast('已删除', 'success');
             } else toast('删除失败', 'error');
