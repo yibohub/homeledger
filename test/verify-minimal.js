@@ -130,6 +130,17 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   check('m.js 识别 busy 反馈（图标旋转 + 「识别中…」+ finally 复原文案，AI 返回前不误认为卡死）',
     js.status === 200 && js.text.includes("classList.add('busy')") && js.text.includes('识别中…')
       && js.text.includes("classList.remove('busy')") && js.text.includes('goSpan.textContent = goLabel'), '');
+  // 草稿卡四项体验（维护者反馈 2026-10-12）
+  check('m.js 草稿卡生成后自动居中（block:center，一眼看到确认按钮无需滚动）',
+    js.status === 200 && js.text.includes('scrollIntoView') && js.text.includes("block: 'center'"), '');
+  check('m.js 账户推荐改紧凑「习惯」标签（完整说明在 title，不再挤压下拉框）',
+    js.status === 200 && js.text.includes("hint.textContent = '习惯'") && js.text.includes("hint.title = '按习惯推荐，可改'"), '');
+  check('m.js 大额勾选仅判定为大额时渲染（小额不出现；收集处空值守卫）',
+    js.status === 200 && js.text.includes('let lumpyIn = null') && js.text.includes('if (it.no_rhythm_suggested) {')
+      && js.text.includes('lumpyIn && lumpyIn.checked'), '');
+  const djsLumpy = await req('GET', '/static/js/app.js', { ua: DESKTOP_UA });
+  check('app.js 大额勾选行同口径按需渲染（仅 no_rhythm_suggested 时出整行）',
+    djsLumpy.status === 200 && /\(it\.no_rhythm_suggested\s*\?\s*'<div class="row tiny"/.test(djsLumpy.text), '');
   check('m.js 账户一律下拉可改（推荐预选 + 「可改」提示，维护者反馈修复）', js.status === 200 && js.text.includes('m-draft-acc-row') && js.text.includes('按习惯推荐，可改'), '');
   check('m.js 草稿卡全字段可改（维护者反馈：只有账户可改不够）', js.status === 200
     && js.text.includes("amountIn.type = 'number'") && js.text.includes("dateIn.type = 'date'")

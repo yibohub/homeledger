@@ -495,10 +495,14 @@
             '<div class="field" style="flex:2"><label>备注</label><input type="text" class="d-note" value="' + esc(it.note || '') + '"></div>' +
             '<div class="field"><label>归属人' + (it.owner_recommended ? ' <span class="ai-hint">按习惯推荐</span>' : '') + '</label><input type="text" class="d-owner" list="ai-owner-list-' + i + '" value="' + esc(it.owner_label || '') + '" placeholder="为谁花，可留空"></div>' +
           '</div>' +
-          '<div class="row tiny" style="margin-top:8px;align-items:center;gap:8px">' +
-            '<label class="check"><input type="checkbox" class="d-lumpy"' + (it.no_rhythm_suggested ? ' checked' : '') + (it.type === 'expense' ? '' : ' disabled') + '> 一次性大额（不计入月末预测节奏）</label>' +
-            (it.no_rhythm_suggested ? '<span class="ai-hint">按统计预勾（本月大额线 ¥' + ((it.no_rhythm_threshold || 0) / 100).toFixed(2) + '）</span>' : '') +
-          '</div>' +
+          // 一次性大额（P7 修订）：仅服务端判定为大额时才渲染，小额不出现（维护者反馈 2026-10-12）；
+          // 未渲染 = 不标记，统计层照常自动判（收集处已空值守卫）
+          (it.no_rhythm_suggested
+            ? '<div class="row tiny" style="margin-top:8px;align-items:center;gap:8px">' +
+              '<label class="check"><input type="checkbox" class="d-lumpy" checked' + (it.type === 'expense' ? '' : ' disabled') + '> 一次性大额（不计入月末预测节奏）</label>' +
+              '<span class="ai-hint">按统计预勾（本月大额线 ¥' + ((it.no_rhythm_threshold || 0) / 100).toFixed(2) + '）</span>' +
+            '</div>'
+            : '') +
           '<datalist id="ai-owner-list-' + i + '">' + (window.__AI_FAMILY__ || []).concat(it.owner_label ? [it.owner_label] : []).filter(function(v, i, a) { return v && a.indexOf(v) === i; }).map(function(n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist>',
         '</div>';
       });

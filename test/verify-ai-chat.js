@@ -51,6 +51,11 @@ const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
   let r = await req('POST', '/api/ai/chat', { json: { text: '午饭 10 元' } });
   check('未登录 POST 被拒', r.status !== 200, `HTTP ${r.status}`);
 
+  // 提示词规则（草稿卡反馈 2026-10-12）：商家/备注提取规则必须存在——「备注为空、起讫地/事由丢失」的根因修复
+  const aiSrc = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'src', 'lib', 'ai.js'), 'utf8');
+  check('SYSTEM_PROMPT 含商家/备注提取规则（起讫地/事由保留不丢）',
+    aiSrc.includes('起讫地') && aiSrc.includes('湘潭北到长沙友谊路'), '');
+
   /* --- 登录 --- */
   r = await req('GET', '/login');
   const loginRes = await req('POST', '/login', { form: { _csrf: csrfOf(r.text), username: 'admin', password: 'admin888' } });
@@ -206,6 +211,13 @@ const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
   r = await req('POST', '/api/ai/chat', { json: { text: '买理财 10000 元' }, cookie });
   check('歧义词（买理财）不拦截', r.json?.engine === 'llm' && mockCalls === beforeSensitive + 4,
     `engine=${r.json?.engine} calls=${mockCalls - beforeSensitive}`);
+
+  // 备注兜底（草稿卡反馈 2026-10-12）：模型没给 note 时，文字路径以清洗后原文补（起讫地/事由不丢）
+  r = await req('POST', '/api/ai/text', { json: { text: '湘潭北到长沙友谊路地铁花费6.3元' }, cookie });
+  check('语境文本走模型（非敏感不误拦）', r.json?.engine === 'llm' && r.json.items?.length === 1,
+    `engine=${r.json?.engine} items=${r.json?.items?.length}`);
+  check('模型空备注时以原文语境兜底（起讫地保留）',
+    (r.json.items || [])[0]?.note === '湘潭北到长沙友谊路地铁', JSON.stringify((r.json.items || [])[0]?.note));
 
   await new Promise((res2) => mock.close(res2));
   db.setSetting('ai.enabled', 'false');
