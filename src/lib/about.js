@@ -8,7 +8,7 @@
  *     页面其余内容不受影响。
  * UPSTREAM：源仓库地址，关于页会注明项目来源与原作者。
  */
-const GITHUB_REPO = 'https://github.com/Panda-995/homeledger';
+const GITHUB_REPO = 'https://github.com/yibohub/homeledger';
 const UPSTREAM = {
   name: '家账簿 HomeLedger（原版）',
   url: 'https://github.com/sucraft-hub/homeledger',
@@ -22,8 +22,8 @@ const APP = {
     '纯后端 SSR 架构，数据 100% 存放在你自己的 NAS / 服务器上。' +
     '支持文字与截图 AI 自动记账、订阅扣费管理、预算与储蓄目标、开放 API 对接，' +
     '零原生依赖，单进程即可运行。',
-  author: 'Panda-995',
-  maintainerNote: 'Fork 版本由 Panda-995 维护与更新（不自动同步上游）。',
+  author: 'yibohub',
+  maintainerNote: '本仓库是 sucraft-hub/homeledger 的 fork（经 Panda-995 维护版续接），在其基础上持续增强；上游有价值的更新酌情同步。',
   aiNote: '本项目的部分代码与文档由 AI 辅助生成。',
 };
 
