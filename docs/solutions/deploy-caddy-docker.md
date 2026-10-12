@@ -34,6 +34,18 @@ TLS 由 Caddy 自动签发/续期**。家账簿照搬该惯例，与其余服务
 
 **验证清单**：容器 `healthy`；`healthz` 200；登录流（GET `/login` 取 `_csrf` → POST 302 →
 带会话 GET `/` 200）；证书 issuer=Let's Encrypt。首访触发签证，重试几次再判失败。
+**生产库只读抽检**（每次发版验证都在做，固化命令）：登录容器用 node:sqlite 只读连接查行数，
+不动数据——
+
+```
+cat <<'EOF' | ssh <部署机> "sudo docker exec -i homeledger node -"
+const { DatabaseSync } = require('node:sqlite');
+const db = new DatabaseSync('/data/homeledger.db', { readOnly: true });
+console.log(db.prepare("SELECT COUNT(*) n FROM transactions WHERE deleted_at IS NULL").get());
+EOF
+```
+
+对比升级前行数即可确认数据无损；迁移验证同法查 `pragma_table_info` / `sqlite_master`。
 
 ## 升级 / 回滚
 
