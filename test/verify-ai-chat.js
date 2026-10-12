@@ -148,13 +148,20 @@ const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
   let mockCalls = 0;
   const MODEL_MERCHANT = '对照模型识别';
   const mock = http.createServer((mq, mr) => {
-    mq.on('data', () => {});
+    let body = '';
+    mq.on('data', (c) => { body += c; });
     mq.on('end', () => {
       mockCalls += 1;
+      // 一行多笔场景（备注兜底 E2E）：命中「京东买书」返回两笔空 note 草稿（金额 20/30 对应两行）
+      const two = body.includes('京东买书');
+      const items = two ? [
+        { type: 'expense', amount: 20, merchant: '京东', category_name: '购物/其他购物', confidence: 0.9 },
+        { type: 'expense', amount: 30, merchant: '淘宝', category_name: '餐饮/零食', confidence: 0.9 },
+      ] : [
+        { type: 'expense', amount: 35, txn_date: new Date().toISOString().slice(0, 10), merchant: MODEL_MERCHANT, category_name: '餐饮/午餐', confidence: 0.9 },
+      ];
       mr.writeHead(200, { 'Content-Type': 'application/json' });
-      mr.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
-        items: [{ type: 'expense', amount: 35, txn_date: new Date().toISOString().slice(0, 10), merchant: MODEL_MERCHANT, category_name: '餐饮/午餐', confidence: 0.9 }],
-      }) } }] }));
+      mr.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ items }) } }] }));
     });
   });
   await new Promise((res2) => mock.listen(0, '127.0.0.1', res2));
@@ -225,6 +232,13 @@ const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
     `engine=${r.json?.engine} items=${r.json?.items?.length}`);
   check('模型空备注时以原文语境兜底（起讫地保留）',
     (r.json.items || [])[0]?.note === '东站到人民广场地铁', JSON.stringify((r.json.items || [])[0]?.note));
+  // 一行多笔（维护者实测 2026-10-12）：备注按金额唯一命中对应到各自来源行，语境不串行
+  r = await req('POST', '/api/ai/text', { json: { text: '今天京东买书20元。淘宝买零食30元。' }, cookie });
+  check('一行多笔走模型（两笔草稿）', r.json?.engine === 'llm' && r.json.items?.length === 2,
+    `engine=${r.json?.engine} items=${r.json?.items?.length}`);
+  check('多笔备注按金额对应来源行（时间词/金额剥净，语境不串行）',
+    (r.json.items || [])[0]?.note === '京东买书' && (r.json.items || [])[1]?.note === '淘宝买零食',
+    JSON.stringify((r.json.items || []).map((i) => i.note)));
   r = await req('POST', '/api/ai/text', { json: { text: '微信支付35元买奶茶' }, cookie });
   check('兜底先剥付款方式词（微信支付不残留、动词不撕词）',
     (r.json.items || [])[0]?.note === '买奶茶', JSON.stringify((r.json.items || [])[0]?.note));

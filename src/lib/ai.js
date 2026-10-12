@@ -860,7 +860,7 @@ function recordDraftFeedback(ledgerId, items) {
 }
 
 /** 规范化单条草稿；sourceText 给出时（纯文字识别），模型给的账户需在原文中有依据，否则交给习惯推荐 */
-function normalizeItem(raw, ledgerId, { sourceText = '', noteFallback = false } = {}) {
+function normalizeItem(raw, ledgerId, { sourceText = '', noteLines = null } = {}) {
   const type = ['expense', 'income', 'transfer'].includes(raw.type) ? raw.type : 'expense';
   const kind = type === 'income' ? 'income' : 'expense';
   const amountCents = Number.isFinite(Number(raw.amount_cents))
@@ -911,19 +911,27 @@ function normalizeItem(raw, ledgerId, { sourceText = '', noteFallback = false } 
     const rec = habitOwnerId(ledgerId, merchant);
     if (rec) { ownerLabel = rec; ownerRecommended = true; }
   }
-  // 备注兜底（草稿卡反馈 2026-10-12）：文字路径模型没给 note 时，以清洗后原文补
-  // （先剥付款方式词——「支付宝」会被动词「支付」撕碎成「宝」（审查 P2-1）——再去金额表达与动词，
-  // 保留起讫地/事由）。收敛为单笔才兜（审查 P2-2）：多行/一行多笔时 sourceText 无法对应到行，
-  // 整段塞给每笔是张冠李戴，比没有更误导。residual 与 merchant 全同时零信息量，不兜（P3-2）。
+  // 备注兜底（草稿卡反馈 2026-10-12）：文字路径模型没给 note 时，以清洗后的来源行补。
+  // 来源行按「金额在行内唯一命中」对应（一行多笔/多行时语境不串行——审查 P2-2；
+  // 单行原文则所有笔共享该行语境）；金额在多行都出现（如两笔都 20 元）时对应不明，不兜。
+  // 清洗：先剥付款方式词（「支付宝」会被动词「支付」撕碎成「宝」——审查 P2-1）与相对时间词，
+  // 再去金额表达与动词，保留起讫地/事由；residual 与 merchant 全同时零信息量，不兜（P3-2）。
   let noteOut = raw.note ? String(raw.note).slice(0, 200) : null;
-  if (!noteOut && noteFallback && sourceText && !/\n/.test(sourceText.trim())) {
-    const residual = sourceText
-      .replace(/(支付宝|微信支付|微信|花呗|余额宝|云闪付|信用卡|现金|银行卡|零钱通|白条)/g, ' ')
-      .replace(/(?:¥|￥|RMB|CNY)?\s*[\d,]+(?:\.\d{1,2})?\s*(?:元|块钱|块|圆)/gi, ' ')
-      .replace(/(花费|支付|付了|付款|消费了?)/g, ' ')
-      .replace(/[\s，,。.、:：!！?？\-—_]+/g, ' ')
-      .trim();
-    if (residual && residual !== merchant) noteOut = residual.slice(0, 120);
+  if (!noteOut && noteLines && noteLines.length) {
+    const yuan = Math.abs(amountCents || 0) / 100;
+    const amtRe = new RegExp('(^|[^0-9.])' + String(yuan).replace('.', '\\.') + '(?=$|[^0-9.]|元|块)');
+    const hits = noteLines.filter((l) => amtRe.test(l));
+    const source = hits.length === 1 ? hits[0] : (noteLines.length === 1 ? noteLines[0] : null);
+    if (source) {
+      const residual = source
+        .replace(/(支付宝|微信支付|微信|花呗|余额宝|云闪付|信用卡|现金|银行卡|零钱通|白条)/g, ' ')
+        .replace(/(今天|昨天|前天|昨晚|今早|上午|下午|晚上|中午|刚刚|刚才)/g, ' ')
+        .replace(/(?:¥|￥|RMB|CNY)?\s*[\d,]+(?:\.\d{1,2})?\s*(?:元|块钱|块|圆)/gi, ' ')
+        .replace(/(花费|支付|付了|付款|消费了?)/g, ' ')
+        .replace(/[\s，,。.、:：!！?？\-—_]+/g, ' ')
+        .trim();
+      if (residual && residual !== merchant) noteOut = residual.slice(0, 120);
+    }
   }
   return {
     draft_id: uid(10),
@@ -1006,8 +1014,8 @@ async function analyzeBill({ images = [], text = '', ledgerId }) {
           model: cfg.model,
           items: items.map((it) => normalizeItem(it, ledgerId, {
             sourceText: images.length ? '' : text,
-            // 单笔才兜备注（审查 P2-2）：多笔时 sourceText 无法对应行，整段塞给每笔是张冠李戴
-            noteFallback: !images.length && items.length === 1,
+            // 备注来源行候选（与 parseTextByRules 同一口径分行），兜底时按金额唯一命中对应
+            noteLines: images.length ? null : String(text || '').split(/\n|;|；|，|,|。/).map((l) => l.trim()).filter(Boolean),
           })),
           warnings,
         };
