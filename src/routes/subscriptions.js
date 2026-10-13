@@ -30,32 +30,33 @@ const PRESETS = [
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** 表单 → 订阅字段 */
-function readForm(body, userId) {
+/** 表单 → 订阅字段；fallbackCycleN：编辑时表单已无「每几期」输入（v1.16.0 同步上游简化），
+ *  未携带时沿用原值，防止历史多期订阅（如每 2 月）被编辑动作静默摊平成每期 */
+function readForm(body, userId, fallbackCycleN = null) {
   const name = String(body.name || '').trim();
   const amount = u.parseAmountToCents(body.amount);
   const cycle = subs.cycleOf(body.cycle);
-  const cycleN = Math.max(1, Math.min(12, Number(body.cycle_n) || 1));
-  const anchorDay = Math.max(1, Math.min(31, Number(body.anchor_day) || Number(todayStr().slice(8, 10))));
+  const cycleN = Math.max(1, Math.min(12, Number(body.cycle_n) || Number(fallbackCycleN) || 1));
   const anchorMonth = body.anchor_month ? Math.max(1, Math.min(12, Number(body.anchor_month))) : null;
   const trialEnds = DAY_RE.test(String(body.trial_ends_on || '')) ? body.trial_ends_on : null;
   const status = ['trial', 'active', 'paused'].includes(body.status) ? body.status : 'active';
 
-  // 首次扣费日：填了就用，填的日期已过则按周期顺延；试用中且未填则默认试用结束日。
-  // 不周期（仅记录）：没有下次扣费日，置为永久未来，不进入自动扣费/到期提醒队列。
-  // 固定到期日：只有一个日期，原样保留（已过期也保留，表示"已到期待确认"）
+  // 唯一日期锚点就是"下次扣费日"，之后按周期日历轮询（advance 以该日期的"日"为锚，
+  // 月末自动收敛如 31→28）。不存在独立的扣费日，避免两个锚点冲突。
+  // 不周期（仅记录）：置为永久未来，不进入自动扣费/到期提醒队列；
+  // 固定到期日：原样保留（已过期也保留，表示"已到期待确认"）
   let next;
   if (cycle === 'none') {
     next = '9999-12-31';
   } else if (cycle === 'fixed') {
     next = DAY_RE.test(String(body.next_charge_at || '')) ? body.next_charge_at : todayStr();
   } else {
-    next = DAY_RE.test(String(body.next_charge_at || '')) ? body.next_charge_at : '';
-    if (!next && trialEnds) next = trialEnds;
-    if (!next) next = todayStr();
+    next = DAY_RE.test(String(body.next_charge_at || '')) ? body.next_charge_at
+      : (trialEnds || todayStr());
     let guard = 0;
-    while (next < todayStr() && guard++ < 500) next = subs.advance(next, { cycle, cycle_n: cycleN, anchor_day: anchorDay });
+    while (next < todayStr() && guard++ < 500) next = subs.advance(next, { cycle, cycle_n: cycleN });
   }
+  const anchorDay = Math.max(1, Math.min(31, Number(next.slice(8, 10)) || 1));
 
   return {
     name: name.slice(0, 40),
@@ -155,7 +156,7 @@ router.post('/subscriptions/:id', auth.requireLogin, auth.requireLedgerWrite, (r
   const id = Number(req.params.id);
   const old = get('SELECT * FROM subscriptions WHERE id = ? AND ledger_id = ?', id, ledgerId);
   if (!old) { res.flash('error', '订阅不存在'); return res.redirect('/subscriptions'); }
-  const d = readForm(req.body, req.session.userId);
+  const d = readForm(req.body, req.session.userId, old.cycle_n);
   if (!d.name || !d.amount_cents) { res.flash('error', '名称与金额不能为空'); return res.redirect(`/subscriptions/${id}/edit`); }
   // 已取消订阅不随表单复活：编辑页状态下拉没有「已取消」选项，保存时沿用原状态
   if (old.status === 'canceled') d.status = 'canceled';

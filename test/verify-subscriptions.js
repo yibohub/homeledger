@@ -417,6 +417,41 @@ const csrfOf = (html) => (html.match(/name="_csrf"\s+value="([^"]+)"/) || [])[1]
   const bad = await req('POST', '/subscriptions', { form: { _csrf: csrfOf(r.text), name: '', amount: '10' } });
   check('缺名称时拒绝创建', bad.status === 302, `HTTP ${bad.status}`);
 
+  /* 唯一锚点 = 下次扣费日：扣费日从该日期推导（日历轮询模型） */
+  r = await req('GET', '/subscriptions');
+  await req('POST', '/subscriptions', { form: {
+    _csrf: csrfOf(r.text), name: '锚点月付', icon: '🧾', amount: '30.00',
+    cycle: 'monthly', next_charge_at: '2026-11-15', status: 'active', auto_renew: '1',
+  } });
+  r = await req('GET', '/subscriptions');
+  check('月付以下次扣费日为锚（11-15 存储且扣费日=15）', r.text.includes('锚点月付') && r.text.includes('2026-11-15'), '');
+
+  r = await req('GET', '/subscriptions');
+  await req('POST', '/subscriptions', { form: {
+    _csrf: csrfOf(r.text), name: '锚点年付', icon: '🧾', amount: '100.00',
+    cycle: 'yearly', next_charge_at: '2027-03-15', status: 'active', auto_renew: '1',
+  } });
+  r = await req('GET', '/subscriptions');
+  check('年付以下次扣费日为锚（2027-03-15）', r.text.includes('锚点年付') && r.text.includes('2027-03-15'), '');
+
+  /* 编辑不携带 cycle_n（v1.16.0 表单简化后）沿用原值：改个备注不能把「每 2 月」静默摊平成每月 */
+  r = await req('GET', '/subscriptions');
+  await req('POST', '/subscriptions', { form: {
+    _csrf: csrfOf(r.text), name: '每两月会员', icon: '🎬', amount: '60.00',
+    cycle: 'monthly', cycle_n: '2', next_charge_at: '2026-11-01', status: 'active', auto_renew: '1',
+  } });
+  r = await req('GET', '/subscriptions');
+  check('每 2 月订阅创建并显示周期标签', r.text.includes('每两月会员') && r.text.includes('每 2 月'));
+  const biIdx = r.text.indexOf('每两月会员');
+  const idBi = biIdx >= 0 ? (r.text.slice(biIdx).match(/\/subscriptions\/(\d+)\/charge/) || [])[1] : null;
+  await req('POST', `/subscriptions/${idBi}`, { form: {
+    _csrf: csrfOf(r.text), name: '每两月会员', icon: '🎬', amount: '60.00',
+    cycle: 'monthly', next_charge_at: '2026-11-01', status: 'active', auto_renew: '1', note: '只改备注',
+  } });
+  r = await req('GET', '/subscriptions');
+  check('编辑未携带 cycle_n 时沿用原值（仍是每 2 月）', r.text.includes('每 2 月'), `id=${idBi}`);
+  check('编辑的其他字段正常保存', r.text.includes('只改备注'));
+
   /* 立即扣费 */
   r = await req('GET', '/subscriptions');
   const charge = await req('POST', `/subscriptions/${idAdobe}/charge`, { form: { _csrf: csrfOf(r.text) } });
