@@ -63,6 +63,13 @@ const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
   check('SYSTEM_PROMPT 含商家/备注提取规则（起讫地/事由保留不丢）',
     aiSrc.includes('起讫地') && aiSrc.includes('东站到人民广场'), '');
 
+  // 提示词规则（维护者实测 2026-10-14）：小票粒度与金额口径必须存在——「单张超市小票被 glm-4v-flash
+  // 按商品分组小计拆成 3 笔、金额取折前小计 576.50 而非实付 539.00」的根因修复
+  check('SYSTEM_PROMPT 含小票粒度规则（单票单总额=一笔，不按商品分组/条目拆笔）',
+    aiSrc.includes('整单只能记一笔') && aiSrc.includes('绝不按商品分组'), '');
+  check('SYSTEM_PROMPT 含金额口径与合并支付规则（取实付总额；主支付方式入 acct、明细入 note）',
+    aiSrc.includes('金额一律取整单实付总额') && aiSrc.includes('合并支付时整单只记一笔'), '');
+
   /* --- 登录 --- */
   r = await req('GET', '/login');
   const loginRes = await req('POST', '/login', { form: { _csrf: csrfOf(r.text), username: 'admin', password: 'admin888' } });
