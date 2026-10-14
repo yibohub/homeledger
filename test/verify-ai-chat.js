@@ -69,7 +69,7 @@ const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
   check('SYSTEM_PROMPT 含小票粒度规则（单票单总额=一笔，不按商品分组/条目拆笔）',
     aiSrc.includes('整单只能记一笔') && aiSrc.includes('绝不按商品分组'), '');
   check('SYSTEM_PROMPT 含金额口径与合并支付规则（每笔取各自金额、多笔禁止加总/加减运算；仅同票多总额才取实付、不用折前小计；主支付方式入 acct、明细入 note）',
-    aiSrc.includes('绝不加总合并') && aiSrc.includes('绝不做任何加减') && aiSrc.includes('凑整运算') && aiSrc.includes('才取实付总额') && aiSrc.includes('不用商品合计或折前小计') && aiSrc.includes('合并支付时整单只记一笔') && aiSrc.includes('整单例外'), '');
+    aiSrc.includes('互相独立的交易') && aiSrc.includes('绝不加总合并') && aiSrc.includes('绝不做任何加减') && aiSrc.includes('凑整运算') && aiSrc.includes('才取实付总额') && aiSrc.includes('不用商品合计或折前小计') && aiSrc.includes('合并支付时整单只记一笔') && aiSrc.includes('整单例外'), '');
 
   /* --- 登录 --- */
   r = await req('GET', '/login');
